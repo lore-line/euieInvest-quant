@@ -21,7 +21,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 
 WORKDIR /workspace
 COPY . .
-RUN uv sync --extra dev
+RUN uv sync --all-extras
 
 ENV PATH="/opt/venv/bin:${PATH}"
 

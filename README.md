@@ -44,6 +44,20 @@ The loader prefers parquet/JSON files in `data/snapshots/` (written by
 `pull-via-api.py`) and transparently falls back to the legacy
 `euieinvest.db` SQLite snapshot if those aren't present.
 
+## Docs site (local)
+
+The API contract and server implementation guide render as a small
+MkDocs Material site:
+
+```sh
+docker compose up docs
+# then visit http://localhost:8000
+```
+
+Live-reload while editing files under `docs/`. The site is **local
+only** — it binds to `127.0.0.1:8000` on the host and is not exposed
+to the network.
+
 ## Native fallback (no Docker)
 
 Prereqs: Python 3.11 and [uv](https://docs.astral.sh/uv/). CUDA 12.8+ on

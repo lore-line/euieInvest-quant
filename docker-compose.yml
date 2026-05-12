@@ -23,3 +23,9 @@ services:
   discover:
     <<: *app
     command: uv run python scripts/discover.py
+
+  docs:
+    <<: *app
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: uv run mkdocs serve --dev-addr 0.0.0.0:8000

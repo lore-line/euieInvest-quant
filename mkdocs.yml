@@ -1,9 +1,10 @@
 site_name: euieInvest-quant
 site_description: ML/quant research platform — outlier-breakout pattern discovery
-site_url: https://lore-line.github.io/euieInvest-quant/
+# Hosted locally only — view via `docker compose up docs` then http://localhost:8000
 repo_url: https://github.com/lore-line/euieInvest-quant
 repo_name: lore-line/euieInvest-quant
 edit_uri: edit/main/docs/
+use_directory_urls: true
 
 docs_dir: docs
 site_dir: site
