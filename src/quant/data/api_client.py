@@ -26,9 +26,10 @@ Typical usage
 from __future__ import annotations
 
 import os
+import time
 from datetime import date, datetime
 from io import BytesIO
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import httpx
 import polars as pl
@@ -41,10 +42,31 @@ __all__ = [
     "fetch_ohlcv",
     "fetch_peer_groups",
     "fetch_snapshot_cursor",
+    "with_retry",
 ]
 
 _DEFAULT_TIMEOUT_S = 120.0
 _MAX_SYMBOLS_PER_REQUEST = 5_000
+
+# Default retry policy used by `with_retry`. The motivating reason is
+# claudehost's API runs as a user-level systemd unit; without
+# `loginctl enable-linger euie` it can drop briefly after a host reboot.
+# One retry covers the typical post-reboot gap. Repeated failures should
+# raise — they're not transients we want to silently mask.
+_DEFAULT_RETRIES = 1
+_DEFAULT_RETRY_DELAY_S = 5.0
+
+_T = TypeVar("_T")
+
+# Connection-class errors we consider transient enough to retry once.
+# 4xx/5xx HTTP responses (wrapped as ApiError) are NOT retried — those
+# are server-side decisions and retrying changes nothing.
+_TRANSIENT_HTTP_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.RemoteProtocolError,
+    httpx.ConnectTimeout,
+)
 
 
 class ApiError(RuntimeError):
@@ -173,6 +195,55 @@ def fetch_anomaly_flags(
         "/anomaly-flags", params=params, accept="application/vnd.apache.parquet"
     )
     return pl.read_parquet(BytesIO(r.content))
+
+
+def with_retry(
+    fn: Callable[[], _T],
+    *,
+    name: str = "fetch",
+    retries: int = _DEFAULT_RETRIES,
+    delay_s: float = _DEFAULT_RETRY_DELAY_S,
+) -> _T:
+    """Call ``fn()`` and retry on transient connection failures.
+
+    Parameters
+    ----------
+    fn:
+        Zero-argument callable that performs the HTTP fetch. Wrap with
+        ``functools.partial`` or a ``lambda`` if your fetcher takes
+        arguments (e.g. ``with_retry(lambda: fetch_ohlcv(since=d), name="ohlcv")``).
+    name:
+        Short label used in the "retrying..." log line. Set to the
+        endpoint name for readable output.
+    retries:
+        Number of additional attempts after the first failure. Defaults
+        to 1 (so the call is attempted at most twice).
+    delay_s:
+        Seconds to sleep between attempts.
+
+    Only retries the transient connection-class errors in
+    ``_TRANSIENT_HTTP_ERRORS``. HTTP 4xx / 5xx responses (wrapped as
+    ``ApiError``) are NOT retried — those are server-side decisions and
+    retrying changes nothing. Any other exception type bubbles up
+    immediately.
+    """
+    attempts = retries + 1
+    last_exc: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except _TRANSIENT_HTTP_ERRORS as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                raise
+            print(
+                f"  {name}: connection failed ({type(exc).__name__}), "
+                f"retrying in {delay_s}s (attempt {attempt}/{attempts})"
+            )
+            time.sleep(delay_s)
+    # Unreachable: the loop either returns on success or re-raises.
+    assert last_exc is not None
+    raise last_exc  # pragma: no cover
 
 
 class ApiClient:

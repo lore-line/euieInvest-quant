@@ -22,18 +22,27 @@ def vol_mult(
 
     A value > 1 means today's volume exceeds its N-day average; a value
     near 2 means a 2× volume day.
+
+    Null when the rolling volume mean is 0 (typical for delisted names
+    that stop receiving Yahoo updates — every recent bar has volume==0).
+    Without this guard, the division produces inf, which silently
+    contaminates downstream xgboost training.
     """
     out = df.sort(["symbol", "date"])
-    cols = [
-        (
-            pl.col("volume").cast(pl.Float64)
-            / pl.col("volume")
+    cols = []
+    for n in windows:
+        rolling_mean_vol = (
+            pl.col("volume")
             .cast(pl.Float64)
             .rolling_mean(window_size=n, min_samples=n)
             .over("symbol")
-        ).alias(f"vol_mult_{n}")
-        for n in windows
-    ]
+        )
+        cols.append(
+            pl.when(rolling_mean_vol > 0)
+            .then(pl.col("volume").cast(pl.Float64) / rolling_mean_vol)
+            .otherwise(None)
+            .alias(f"vol_mult_{n}")
+        )
     return out.with_columns(cols)
 
 

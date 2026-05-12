@@ -47,6 +47,26 @@ def test_vol_mult_spike_above_one() -> None:
     assert abs(out["vol_mult_5"].tail(1).item() - 5000 / 1800) < 1e-9
 
 
+def test_vol_mult_null_on_zero_volume_window() -> None:
+    """When the rolling volume mean is exactly 0 (delisted name with
+    all-zero recent volume), vol_mult must be null — NOT inf. inf in
+    the feature matrix poisons xgboost training. Regression-tests the
+    rolling_mean>0 guard in vol_mult.
+    """
+    df = _build("A", [10.0] * 20, [0] * 20)
+    out = vol_mult(df, windows=(5,))
+    vals = out["vol_mult_5"].to_list()
+
+    # First 4 rows null from insufficient window
+    assert all(v is None for v in vals[:4])
+    # Rows 4..19 have a fully-zero-volume window → null (not inf, not NaN)
+    flat_vals = vals[4:]
+    assert all(v is None for v in flat_vals), (
+        f"zero-volume window should produce null, got {flat_vals}"
+    )
+    assert out.height == 20
+
+
 def test_obv_slope_positive_on_rising_close() -> None:
     closes = [float(c) for c in range(1, 31)]
     df = _build("A", closes, [1000] * 30)

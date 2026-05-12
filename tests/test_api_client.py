@@ -223,6 +223,111 @@ def test_base_url_trailing_slash_normalized(
         assert route.called
 
 
+# -- with_retry helper --------------------------------------------------------
+#
+# These tests exercise the retry wrapper used by scripts/pull-via-api.py.
+# Connection-class errors should retry once; HTTP 4xx/5xx (ApiError) and
+# other exceptions should NOT retry.
+
+
+def test_with_retry_succeeds_on_first_attempt() -> None:
+    """No failure → no retry, no message."""
+    calls = []
+
+    def fetcher() -> str:
+        calls.append(1)
+        return "ok"
+
+    result = api_client.with_retry(fetcher, name="t", delay_s=0.0)
+    assert result == "ok"
+    assert len(calls) == 1
+
+
+def test_with_retry_recovers_from_one_connect_error() -> None:
+    """Single transient failure → retry succeeds → returns result."""
+    calls = []
+
+    def fetcher() -> str:
+        calls.append(1)
+        if len(calls) == 1:
+            raise httpx.ConnectError("boom")
+        return "ok"
+
+    result = api_client.with_retry(fetcher, name="t", delay_s=0.0)
+    assert result == "ok"
+    assert len(calls) == 2
+
+
+def test_with_retry_raises_after_repeated_failures() -> None:
+    """Two consecutive failures → bubble up the second exception."""
+    calls = []
+
+    def fetcher() -> str:
+        calls.append(1)
+        raise httpx.ConnectError(f"boom {len(calls)}")
+
+    with pytest.raises(httpx.ConnectError, match="boom 2"):
+        api_client.with_retry(fetcher, name="t", delay_s=0.0)
+    assert len(calls) == 2
+
+
+def test_with_retry_does_not_retry_on_api_error() -> None:
+    """HTTP 4xx/5xx wrapped as ApiError is NOT a transient — no retry."""
+    calls = []
+
+    def fetcher() -> str:
+        calls.append(1)
+        raise ApiError(503, "db down", "http://test.invalid/api/v1/health")
+
+    with pytest.raises(ApiError):
+        api_client.with_retry(fetcher, name="t", delay_s=0.0)
+    assert len(calls) == 1, "ApiError must NOT trigger retry"
+
+
+def test_with_retry_does_not_retry_on_unexpected_exception() -> None:
+    """Unknown exception types bubble up immediately; we only retry
+    the narrow transient set."""
+    calls = []
+
+    def fetcher() -> str:
+        calls.append(1)
+        raise ValueError("programming error")
+
+    with pytest.raises(ValueError):
+        api_client.with_retry(fetcher, name="t", delay_s=0.0)
+    assert len(calls) == 1
+
+
+def test_with_retry_retries_zero_when_disabled() -> None:
+    """retries=0 → single attempt, no recovery."""
+    calls = []
+
+    def fetcher() -> str:
+        calls.append(1)
+        raise httpx.ReadError("interrupted")
+
+    with pytest.raises(httpx.ReadError):
+        api_client.with_retry(fetcher, name="t", retries=0, delay_s=0.0)
+    assert len(calls) == 1
+
+
+def test_with_retry_handles_read_error_and_protocol_error() -> None:
+    """The transient set includes ReadError and RemoteProtocolError, not
+    just ConnectError — same retry behavior."""
+    for exc_cls in (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectTimeout):
+        calls = []
+
+        def fetcher() -> str:
+            calls.append(1)
+            if len(calls) == 1:
+                raise exc_cls(f"transient {exc_cls.__name__}")
+            return "ok"
+
+        result = api_client.with_retry(fetcher, name="t", delay_s=0.0)
+        assert result == "ok", f"{exc_cls.__name__} should be retried"
+        assert len(calls) == 2
+
+
 def test_api_client_class_smoke() -> None:
     """ApiClient() exposes the same surface as the module-level fetchers."""
     c = api_client.ApiClient()
