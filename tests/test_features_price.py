@@ -103,3 +103,23 @@ def test_n_day_high_low_per_symbol() -> None:
     assert all(
         v is None or abs(v - 1 / 1.01) < 1e-9 for v in a + b
     )
+
+
+def test_band_position_null_on_perfectly_flat_window() -> None:
+    """When the rolling window's std is 0 (flat close), bb_position must
+    be null — NOT NaN. NaN poisons downstream xgboost; null is handled
+    natively. This regression-tests the std==0 guard in band_position.
+    """
+    df = _build({"A": [10.0] * 30})
+    out = band_position(df, window=20)
+    vals = out["bb_position_20"].to_list()
+
+    # First 19 rows have insufficient window → null
+    assert all(v is None for v in vals[:19]), "warm-up should be null"
+    # Rows 19..29 have a fully-flat window → std=0 → null (not NaN)
+    flat_window_vals = vals[19:]
+    assert all(v is None for v in flat_window_vals), (
+        f"flat window should produce null, got {flat_window_vals}"
+    )
+    # And we kept the row count
+    assert out.height == 30

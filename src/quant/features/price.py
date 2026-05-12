@@ -63,6 +63,12 @@ def band_position(df: pl.DataFrame, window: int = 20) -> pl.DataFrame:
 
     ``bb_position_{window} = (close - SMA_w) / (2 * STD_w)``. Values near
     0 mean close is at the SMA; ±1 means at the ±2σ band.
+
+    Null when the rolling window is perfectly flat (std == 0), which
+    avoids 0/0 = NaN from polars float division. Flat windows happen on
+    halted or illiquid names — they're rare but real, and a NaN in the
+    feature matrix poisons downstream xgboost training. Prefer null,
+    which xgboost handles natively.
     """
     out = df.sort(["symbol", "date"])
     mean = (
@@ -76,7 +82,10 @@ def band_position(df: pl.DataFrame, window: int = 20) -> pl.DataFrame:
         .over("symbol")
     )
     return out.with_columns(
-        ((pl.col("close") - mean) / (2 * std)).alias(f"bb_position_{window}")
+        pl.when(std > 0)
+        .then((pl.col("close") - mean) / (2 * std))
+        .otherwise(None)
+        .alias(f"bb_position_{window}")
     )
 
 

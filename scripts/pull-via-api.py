@@ -29,31 +29,29 @@ Writes the following to ``data/snapshots/`` (or
 - ``peer_groups.json``     — sector membership dict
 - ``anomaly_flags.parquet`` — doctrine flag log
 - ``cursor.json``          — server-reported cursor + fetch timestamp
+
+``cursor.json`` is written LAST so a crash mid-pull leaves the
+previous cursor intact; the next run sees the old cursor and
+re-fetches from scratch.
+
+Each fetch is wrapped in ``api_client.with_retry`` so a transient
+connection failure (typically: a brief server drop after a claudehost
+reboot, while the systemd unit's linger is not yet enabled) retries
+once before bailing.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-import time
 from datetime import date, datetime, timezone
+from functools import partial
 from pathlib import Path
-
-import httpx
 
 from quant.data import api_client
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_SNAPSHOT_DIR = _REPO_ROOT / "data" / "snapshots"
-
-# Server is currently a user-level systemd unit on claudehost; without
-# `loginctl enable-linger euie` it can drop briefly after a host
-# reboot. Retry ONCE on a clean connection failure before bailing, so
-# routine cron runs survive the gap. This is intentionally a single
-# retry — repeated failures should bubble up and page someone, not
-# loop silently.
-_CONNECT_RETRIES = 1
-_CONNECT_RETRY_DELAY_S = 5.0
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -75,29 +73,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _health_with_retry() -> dict:
-    """Probe /health, retrying once on a clean connection failure.
-
-    See _CONNECT_RETRIES rationale above. We use /health as the canary
-    because it's the cheapest endpoint and any infra-level problem
-    will surface here before we ask for parquet bytes.
-    """
-    attempts = _CONNECT_RETRIES + 1
-    for attempt in range(1, attempts + 1):
-        try:
-            return api_client.fetch_health()
-        except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as exc:
-            if attempt >= attempts:
-                raise
-            print(
-                f"  health: connection failed ({type(exc).__name__}), "
-                f"retrying in {_CONNECT_RETRY_DELAY_S}s "
-                f"(attempt {attempt}/{attempts})",
-            )
-            time.sleep(_CONNECT_RETRY_DELAY_S)
-    raise RuntimeError("unreachable")  # pragma: no cover
-
-
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     out = args.snapshot_dir
@@ -105,25 +80,31 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Pulling from {api_client._base_url()}")
 
-    health = _health_with_retry()
+    health = api_client.with_retry(api_client.fetch_health, name="health")
     print(
         f"  health: status={health['status']} "
         f"service={health['service']} v{health['service_version']}"
     )
 
-    cursor = api_client.fetch_snapshot_cursor()
+    cursor = api_client.with_retry(
+        api_client.fetch_snapshot_cursor, name="snapshot-cursor"
+    )
     print(
         f"  cursor: ohlcv max_date={cursor['ohlcv']['max_date']} "
         f"rows={cursor['ohlcv']['row_count']:,} | "
         f"flags max_id={cursor['anomaly_flags']['max_id']}"
     )
 
-    ohlcv = api_client.fetch_ohlcv(since=args.since)
+    ohlcv = api_client.with_retry(
+        partial(api_client.fetch_ohlcv, since=args.since), name="ohlcv"
+    )
     ohlcv_path = out / "ohlcv.parquet"
     ohlcv.write_parquet(ohlcv_path)
     print(f"  ohlcv: wrote {ohlcv.height:,} rows -> {ohlcv_path.relative_to(_REPO_ROOT)}")
 
-    peer_groups = api_client.fetch_peer_groups()
+    peer_groups = api_client.with_retry(
+        api_client.fetch_peer_groups, name="peer-groups"
+    )
     pg_path = out / "peer_groups.json"
     pg_path.write_text(json.dumps(peer_groups, indent=2, sort_keys=True))
     print(
@@ -132,7 +113,9 @@ def main(argv: list[str] | None = None) -> int:
         f"-> {pg_path.relative_to(_REPO_ROOT)}"
     )
 
-    flags = api_client.fetch_anomaly_flags()
+    flags = api_client.with_retry(
+        api_client.fetch_anomaly_flags, name="anomaly-flags"
+    )
     flags_path = out / "anomaly_flags.parquet"
     flags.write_parquet(flags_path)
     print(
