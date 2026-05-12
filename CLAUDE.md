@@ -197,11 +197,10 @@ is_winner[t] := (max(close_adj[t+1 .. t+30]) / close_adj[t]) >= 1.20
 ```
 
 Last 30 rows per symbol have null `is_winner`. `src/quant/labels.py`
-operates on whichever column is named `close` in the input DataFrame;
-callers must rename `close_adj → close` before passing in (or update
-the function to take a column name). Today `discover.py` still passes
-raw `close`; that's a code follow-up, not a spec change. The label
-**spec is `close_adj`**, full stop.
+takes a `price_col` parameter; `scripts/discover.py` passes
+`price_col="close_adj"` to match this spec. Features still operate on
+`close` (split-adj) per CLAUDE.md §11 — keeping label-basis (total
+return) separate from feature-basis (split-only) is intentional.
 
 Three comparison variants to run side-by-side at the analysis stage:
 
@@ -249,20 +248,20 @@ Holdout: 2025-01-01 → today   (touched ONCE at the end)
 
 ## 9. Class imbalance
 
-Winners are **~18.96% of non-null rows** at the +20%/30d threshold on
-the `close_adj` (total-return) label, per the 2026-05-12 rebaseline on
-the live snapshot (2,431,189 rows → 449,387 winners across 2,369,842
-non-null rows). The bootstrap brief estimated 4–7%; that turned out to
-be a rough guess. The prior figure (18.78%, on `close`) is documented
-here for traceability — see §11 for the +0.18 pp drift breakdown.
-Therefore:
+Winners are **~18.94% of non-null rows** at the +20%/30d threshold on
+the `close_adj` (total-return) label, per the 2026-05-12 post-cleanup
+rebaseline on the live snapshot (2,430,543 rows → 448,741 winners
+across 2,369,196 non-null rows). The bootstrap brief estimated 4–7%;
+that turned out to be a rough guess. The prior figure (18.78%, on
+`close`) is documented here for traceability — see §11 for the drift
+breakdown and the DEC contamination correction. Therefore:
 
-- `scale_pos_weight ≈ 4.27` for the train set (not 14–23 as the brief
-  assumed). Recompute exactly per the train slice.
+- `scale_pos_weight ≈ 4.28` for the full population (recompute
+  exactly per the train slice; not 14–23 as the brief assumed).
 - **Report** precision@top-decile AND recall, not accuracy/F1 alone.
 - The discovery question is "what does the top-decile predicted-positive
   cohort look like", not "did the model beat 50% accuracy".
-- 18.96% is higher than typical price-discovery setups. Sanity check
+- 18.94% is higher than typical price-discovery setups. Sanity check
   before training: confirm the label spec in §6 still feels right;
   it's the threshold + lookahead that drives this number.
 
@@ -284,19 +283,34 @@ Therefore:
   (NOT dividend-adjusted). Total-return features must use the new
   `close_adj` column from the /ohlcv migration tracked in
   [PR #10](https://github.com/lore-line/euieInvest-quant/pull/10) +
-  the server-side flip (now merged + deployed). **Rebaseline (2026-05-12):**
-  positive rate on `close_adj` is **18.9627%** (449,387 / 2,369,842),
-  vs **18.7822%** (445,108 / 2,369,842) on `close` — a **+0.18 pp**
-  upward drift, well within the predicted "fractional, not structural"
-  range. Net 4,319 → winner flips, 40 → non-winner flips; lift
-  concentrates on high-yield REITs (BXMT, RPT), shipping/MLP-style
-  payers (LPG, GNK, FLNG), and small-cap banks (LKFN, BCC) as
-  expected. One outlier — `DEC` with 604 flips, 14% of all lift in
-  a single ticker — was spot-checked server-side against
-  `price_history.close_adj`: smooth dividend-accretion slope in
-  `close_adj / close`, no step-function discontinuity. Legitimate
-  very-high-yielder; +604 contribution stays. See PR #1, 2026-05-12
-  comments for full table.
+  the server-side flip (now merged + deployed). **Pre-cleanup
+  rebaseline (2026-05-12 morning):** positive rate on `close_adj`
+  was **18.9627%** (449,387 / 2,369,842), vs **18.7822%**
+  (445,108 / 2,369,842) on `close` — apparent +0.18 pp upward drift.
+  Net 4,319 → winner flips, 40 → non-winner flips; legitimate lift
+  on high-yield REITs (BXMT, RPT), shipping/MLP-style payers (LPG,
+  GNK, FLNG), and small-cap banks (LKFN, BCC) as expected.
+  **DEC contamination correction (2026-05-12 afternoon, supersedes
+  prior amendment):** the largest outlier — `DEC` with 604 lift, 14%
+  of all flips in a single ticker — was **not** a real high-yielder.
+  Pre-2023-12-05 rows for `DEC` were LSE-listed data leaking into
+  the NYSE symbol slot, with `close` in GBP single-digits and Yahoo
+  `adjclose = 0.0` (no historical close_adj on the LSE side). The
+  +604 lift was a div-by-zero artifact in the label function:
+  `max(close_adj[t+1..t+30]) / 0 = inf >= 1.2 → True`. An earlier
+  spot-check that claimed "smooth `close_adj / close` slope" was
+  reading the post-2023-12-05 NYSE rows only, missing the 646
+  pre-NYSE rows where `close_adj = 0`. **Server cleaned up
+  2026-05-12** — `price_history` row count 2,431,189 → 2,430,543
+  (Δ -646). **Post-cleanup**: positive rate on `close_adj` is
+  **18.9406%** (448,741 / 2,369,196); the cleanup removed exactly
+  646 spurious winners (close_adj-zero rows counted as winner under
+  the inf-comparison), and the base rate barely moves because the
+  denominator drops by the same amount. The +0.18 pp pre-cleanup
+  drift narrows to **+0.16 pp** post-cleanup (18.9406% vs ~18.78%
+  on `close`, denominator-adjusted) — still small, still legitimate
+  dividend lift on the REIT/shipping/MLP cohort. See
+  PR #1, 2026-05-12 comments for the full table.
 - **(Corrected.)** An earlier draft of this caveats list claimed
   "mixed adjustment basis" (close split+div-adjusted, raw OHLV). That
   was wrong — all stored columns are consistently split-adjusted. See
