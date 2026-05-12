@@ -1,3 +1,7 @@
+# DEPRECATED — use scripts/pull-via-api.py once the euieInvest data API is
+# live in prod. This scp path remains operational during the cutover
+# window and will be removed per plans/api-data-plane.md PR #6.
+#
 # Pull the trading-platform SQLite snapshot from claudehost over Tailscale.
 # Run from the repo root in native PowerShell.
 $ErrorActionPreference = 'Stop'

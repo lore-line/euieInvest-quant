@@ -27,30 +27,52 @@ beat** in Step 5 — not a prior we encode into features.
 ## 3. Architecture decisions
 
 - **Offline-of-production.** This repo does not run alongside the trading
-  platform. It reads a periodic SQLite snapshot, runs analysis, and emits
-  batch JSON / Markdown reports. The trading platform on `claudehost`
-  consumes outputs out-of-band.
-- **No FastAPI / inference server in Phase 1.** Add one only after the
-  Phase 2 go/no-go gate (§14) is cleared.
+  platform. It pulls source data from euieInvest's read-only data API,
+  runs analysis locally on heaven-pc, and emits batch JSON / Markdown
+  reports. The trading platform on `claudehost` consumes outputs
+  out-of-band (e.g. a shared report directory, or a future write-back
+  endpoint).
+- **Source-data API on claudehost; no model-serving API yet.** euieInvest
+  exposes `/api/v1/*` parquet endpoints over Tailscale-bound HTTP — see
+  `docs/api-contract.md` for the contract this repo consumes. A
+  **model-serving / inference API on heaven-pc** is explicitly out of
+  scope until the Phase 2 go/no-go gate (§14) is cleared. The two are
+  separate: source-data serving is allowed in Phase 1; inference serving
+  is not.
 - **Polars, not pandas.** Single source of truth for tabular dtypes.
+- **Parquet over Tailscale** as the data wire format. ~10× smaller than
+  NDJSON for OHLCV; zero-copy through pyarrow into polars.
 - **uv-managed**, Python 3.11 pinned via `.python-version` and `pyproject.toml`.
 
 ## 4. Source data shape
 
-The snapshot is `data/snapshots/euieinvest.db` (rsync target of
-`/home/euie/nextcloud/CODE/euieInvest/data/euieinvest.db.bak` on claudehost).
-Three relevant tables:
+The local cache lives under `data/snapshots/`:
 
-```sql
-price_history(symbol TEXT, date TEXT, close REAL, high REAL, low REAL, volume INTEGER)
-peer_groups(group_name TEXT, symbol TEXT)
-anomaly_flags(id INTEGER, symbol TEXT, flag_date TEXT, fire_date TEXT,
-              pivot_price REAL, vol_mult REAL, rsi REAL, sma20 REAL, sma50 REAL,
-              peer_group TEXT, tier TEXT, status TEXT, …)
-```
+- `ohlcv.parquet` — `price_history` (symbol, date, close, high, low, volume)
+- `peer_groups.json` — `{group_name: [symbol, ...]}`
+- `anomaly_flags.parquet` — 22-col flag log (id, symbol, flag_date,
+  fired_at, pivot_price, vol_mult, rsi, sma20, sma50, peer_group, tier,
+  status, position_units, entry_price, entry_at, peak_price,
+  trailing_stop, invalidated_at, exited_at, exit_reason, dismissed_until,
+  notes)
+- `cursor.json` — server cursor + fetch timestamp; produced by the pull
+  script, consumed by future incremental syncs
 
-`price_history` covers 2021-05-12 → 2026-05-11 (5y). `anomaly_flags` is the
-prior doctrine's flag log — used as a baseline cohort, not a feature source.
+These are refreshed by `scripts/pull-via-api.py`, which calls
+euieInvest's `/api/v1/{ohlcv,peer-groups,anomaly-flags,snapshot-cursor,health}`
+endpoints. The canonical wire contract is `docs/api-contract.md`.
+
+`price_history` covers 2021-05-12 → 2026-05-11 (5y, ~2.43M rows, ~2,046
+symbols). `anomaly_flags` is the prior hand-crafted doctrine's flag log,
+treated as a **baseline cohort** to beat in Step 5 — not as a feature
+source.
+
+**Legacy fallback** (during cutover): if the parquet/JSON files are
+absent, `quant.data.loader` transparently reads a local SQLite snapshot
+at `data/snapshots/euieinvest.db`, refreshed by the legacy
+`scripts/pull-snapshot.{sh,ps1}` rsync scripts. The legacy path will be
+removed after the API is verified live in prod for ≥ 1 week — see
+`plans/api-data-plane.md` PR #6 for the deletion criteria.
 
 ## 5. Methodology — 5 steps
 
@@ -161,7 +183,11 @@ Winners are ~4–7% of rows. Therefore:
 ## 12. NOT building yet
 
 - No deep learning. No LSTM / Transformer. XGBoost is enough until it isn't.
-- No inference server. No live trading hooks. No continuous training.
+- **No model-serving / inference server on heaven-pc.** No live trading
+  hooks. No continuous training. (The source-data API on claudehost —
+  see §3 and §4 — is allowed and in fact the operational data plane.
+  The prohibition here is about exposing the *model's* predictions over
+  HTTP.)
 - No alternative data (news, options flow, fundamentals). Phase 1 is
   price/volume/peer only.
 
@@ -214,10 +240,21 @@ Iterate on features, not on the holdout.
 
 ## 15. Tailnet topology
 
-- `claudehost` (Tailscale `100.68.86.56`) — source of truth, runs euieInvest trading prod
-- `heaven-pc`  (Tailscale `100.103.175.27`) — this repo, RTX 5090 compute
+- `claudehost` (Tailscale `100.68.86.56`) — source of truth; runs
+  euieInvest trading prod and hosts the data API on a Tailscale-bound
+  port.
+- `heaven-pc`  (Tailscale `100.103.175.27`) — this repo, RTX 5090 compute.
 
-SSH from `heaven-pc` → `claudehost` must work before `scripts/pull-snapshot.*` runs:
+**Primary data plane (once API is live)**: HTTP over Tailscale.
+`heaven-pc` resolves `EUIEINVEST_API_BASE_URL` (e.g.
+`http://100.68.86.56:8443`) and calls `/api/v1/*`. No SSH required for
+routine data fetches.
+
+**Legacy data plane (during cutover)**: SSH+rsync. The legacy
+`scripts/pull-snapshot.{sh,ps1}` scripts rsync the SQLite snapshot
+directly. Still operational; deleted once the API is verified in prod.
+
+SSH setup (still useful for ad-hoc admin and the legacy path):
 
 ```sh
 # First-run host-key TOFU:
