@@ -210,11 +210,28 @@ Returns rows from `price_history`.
 | Column | Parquet type | NDJSON type | Notes |
 |---|---|---|---|
 | `symbol` | `string` (utf8) | string | |
-| `date` | `date32` | string `YYYY-MM-DD` | |
-| `close` | `float64` | number | |
-| `high` | `float64` | number | |
-| `low` | `float64` | number | |
-| `volume` | `int64` | number | |
+| `date` | `date32` | string `YYYY-MM-DD` | exchange-local trading date (NYSE/NASDAQ, ET) |
+| `open` | `float64` | number | split-adjusted opening price |
+| `close` | `float64` | number | **split-adjusted only** (NOT dividend-adjusted) |
+| `close_adj` | `float64` | number | split + dividend-adjusted (Yahoo's `adjclose`) |
+| `high` | `float64` | number | split-adjusted |
+| `low` | `float64` | number | split-adjusted |
+| `volume` | `int64` | number | split-adjusted |
+
+**Adjustment basis** (load-bearing — see consumer's CLAUDE.md §4 and §11 for
+the long-form story):
+
+- All six numeric columns are **consistently split-adjusted** from
+  Yahoo's `chart()` endpoint. No split-day jumps. Verified empirically
+  against NVDA 10:1 (2024-06-10) and TSLA 3:1 (2022-08-25).
+- `close` and `close_adj` differ ONLY on ex-dividend dates. The
+  `(close, close_adj)` divergence is the canonical ex-dividend
+  detector.
+- Use `close` for split-adjusted price-only analysis. Use `close_adj`
+  for total-return labels and any feature that should incorporate
+  dividends (e.g. high-yield REITs/utilities).
+- `open`, `high`, `low` are split-adjusted but NOT
+  dividend-adjusted, consistent with `close`.
 
 Row ordering is unspecified. Clients SHOULD sort by `(symbol, date)`
 client-side after load if order matters.
@@ -372,3 +389,4 @@ Non-binding suggestions for whoever builds the server:
 |---|---|---|
 | 1.0.0-draft | 2026-05-12 | Initial draft. Not yet implemented on server. |
 | 1.0.0 | 2026-05-12 | Server implementation shipped on claudehost (`100.68.86.56:8443`); 11/11 contract tests pass. Status-enum text in §5.5 corrected from `{open,…}` to `{active,entered,…}` to match the actual trading-platform DB state machine (additive clarification only — no wire-format change). |
+| 1.1.0 | 2026-05-12 | §5.3 adds `open` (split-adjusted) and `close_adj` (split + dividend-adjusted) to the /ohlcv response. Additive per §2 — clients selecting columns by name continue to work unchanged. Adjustment-basis paragraph added to §5.3 documenting that all six numeric columns are consistently split-adjusted (the earlier "mixed basis" caveat was incorrect; verified empirically against NVDA 10:1 and TSLA 3:1 splits). |
