@@ -321,6 +321,83 @@ observed in the prod snapshot):
 Columns added in future server versions are non-breaking; clients select
 columns by name and ignore extras.
 
+### 5.6 `GET /api/v1/symbols` — **[DRAFT — pending server implementation]**
+
+> **Status**: consumer-team-decided 2026-05-12, not yet implemented on the
+> server side. This section is the agreed-on shape; the server team builds
+> when ready, then flips this section's status to "shipped". Linked
+> discussion: PR #1, comment by `lore-line` 2026-05-12.
+
+Returns per-symbol static-ish metadata. Used by the consumer's
+`cap_bucket` and `market_regime` feature modules, plus survivorship
+filtering in honest analysis.
+
+**Request**: no parameters. `format` is **not** accepted — the response
+is always JSON (dict-shaped, not tabular).
+
+**Response 200** (`application/json`):
+
+```json
+{
+  "AAPL": {
+    "status": "active",
+    "last_seen": "2026-05-12",
+    "shares_outstanding": 15204000000,
+    "sector": "Technology",
+    "listing_date": "1980-12-12"
+  },
+  "DELISTED_X": {
+    "status": "delisted",
+    "last_seen": "2024-03-15",
+    "shares_outstanding": null,
+    "sector": "Industrial",
+    "listing_date": "2003-04-01"
+  }
+}
+```
+
+Fields per symbol:
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | string | `"active"` or `"delisted"`. Other values reserved. |
+| `last_seen` | `YYYY-MM-DD` | last trading date the symbol had a price row. For active names this is recent; for delisted names this is the final price date. |
+| `shares_outstanding` | int \| null | current shares outstanding (split-adjusted, consistent with `price_history.close`). Nullable for delisted names where the figure is unavailable. |
+| `sector` | string \| null | freeform sector label. Nullable for unclassified symbols. |
+| `listing_date` | `YYYY-MM-DD` \| null | original NYSE/NASDAQ listing date. Nullable when unknown. |
+
+**Why current shares + point-in-time price** instead of point-in-time
+shares: consumer derives `market_cap[t] = close[t] × shares_outstanding`
+row-side. Share-count drift (~1-3%/yr) is small relative to 5y price
+drift, so this is a defensible cheap approximation of point-in-time
+market cap. The alternative (a per-date `shares_outstanding` time
+series) was rejected as too expensive to source from Yahoo cleanly.
+
+**Why this matters (target-leakage discussion)**: a current-only
+`market_cap_usd` field would inject a tautology into the consumer's
+training window — stocks that are now mega-cap were big winners in
+2021-2023 by construction. Labeling 2021 rows by today's cap teaches
+the model "be currently large", not a structural property. Honest
+discovery requires the historical price × current-shares
+approximation above.
+
+**Fallback** if `shares_outstanding` is hard to source cleanly from
+yahoo-finance2's `quote()` / `quoteSummary()`: server may ship
+`market_cap_usd` (current-only) instead, and the consumer's
+honest-caveats will note that `cap_bucket` is biased toward current
+cap. Point-in-time via `shares_outstanding` is preferred but not a
+hard requirement.
+
+**Refresh cadence**: daily is fine. Static metadata doesn't churn.
+
+**Test fixture** (when implemented): consumer team will add a
+contract test `test_symbols_returns_per_ticker_metadata` that asserts:
+- response is `application/json`
+- each value is a dict with the five required keys
+- `status ∈ {"active", "delisted"}`
+- `last_seen` is parseable as ISO date
+- if `shares_outstanding` is present, it's a positive integer
+
 ---
 
 ## 6. Worked client example
@@ -390,3 +467,4 @@ Non-binding suggestions for whoever builds the server:
 | 1.0.0-draft | 2026-05-12 | Initial draft. Not yet implemented on server. |
 | 1.0.0 | 2026-05-12 | Server implementation shipped on claudehost (`100.68.86.56:8443`); 11/11 contract tests pass. Status-enum text in §5.5 corrected from `{open,…}` to `{active,entered,…}` to match the actual trading-platform DB state machine (additive clarification only — no wire-format change). |
 | 1.1.0 | 2026-05-12 | §5.3 adds `open` (split-adjusted) and `close_adj` (split + dividend-adjusted) to the /ohlcv response. Additive per §2 — clients selecting columns by name continue to work unchanged. Adjustment-basis paragraph added to §5.3 documenting that all six numeric columns are consistently split-adjusted (the earlier "mixed basis" caveat was incorrect; verified empirically against NVDA 10:1 and TSLA 3:1 splits). |
+| 1.2.0-draft | 2026-05-12 | New §5.6 `GET /api/v1/symbols` (DRAFT) added. Per-symbol static-ish metadata: status, last_seen, shares_outstanding, sector, listing_date. Consumer derives point-in-time `market_cap[t] = close[t] × shares_outstanding`. Not yet implemented server-side; section will move from `1.2.0-draft` to `1.2.0` when shipped. |
