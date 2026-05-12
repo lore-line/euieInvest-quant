@@ -79,13 +79,36 @@ def test_ohlcv_returns_parquet_with_correct_schema() -> None:
     assert r.headers["content-type"] == "application/vnd.apache.parquet"
 
     df = pl.read_parquet(BytesIO(r.content))
-    assert set(df.columns) == {"symbol", "date", "close", "high", "low", "volume"}
+
+    # Required columns — contract §5.3. Subset semantics (not exact-match)
+    # so the server can add columns additively per §2 versioning policy.
+    required_cols = {"symbol", "date", "close", "high", "low", "volume"}
+    assert required_cols.issubset(set(df.columns)), (
+        f"missing required ohlcv columns: {required_cols - set(df.columns)}"
+    )
+
+    # Required dtypes
     assert df.schema["symbol"] == pl.Utf8
     assert df.schema["date"] == pl.Date
     assert df.schema["close"] == pl.Float64
     assert df.schema["high"] == pl.Float64
     assert df.schema["low"] == pl.Float64
     assert df.schema["volume"] == pl.Int64
+
+    # Forward-looking dtype checks for additive columns we expect to land:
+    # - `open`: split-adjusted open price (consistent basis with close/high/low)
+    # - `close_adj`: split + dividend-adjusted close (Yahoo's adjclose)
+    # When the server ships these as part of the contract §5.3 response, the
+    # types are pinned here so a future-typed regression fails loudly.
+    if "open" in df.columns:
+        assert df.schema["open"] == pl.Float64, (
+            "open must be Float64 (split-adjusted, consistent with close)"
+        )
+    if "close_adj" in df.columns:
+        assert df.schema["close_adj"] == pl.Float64, (
+            "close_adj must be Float64 (split + dividend-adjusted)"
+        )
+
     assert df.height > 0, "live server should have non-empty ohlcv data"
 
 
