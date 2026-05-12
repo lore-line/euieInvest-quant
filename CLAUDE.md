@@ -76,17 +76,27 @@ is no pre-2026-05-12 history; see §1.
 
 **Data-shape gotchas (load-bearing — confirmed with the trading-platform team 2026-05-12):**
 
-- **Mixed adjustment basis.** `price_history.close` is Yahoo's
-  `adjClose` (split-and-dividend-adjusted). `high`, `low`, and
-  `volume` are **raw** (unadjusted) values. Returns computed off
-  `close` are clean across splits; per-bar features that mix close
-  with raw OHLV (e.g. body-vs-range, gap vs close) drift on
-  split days. The server team is adding a `close_raw` column in a
-  follow-up so we can opt into a consistent basis.
-- **No `open` column yet.** Currently `(symbol, date, close, high,
-  low, volume)`. The server team is adding `open` as an additive
-  change. Two feature functions in `quant/features/gaps.py`
-  (`gap_pct`, `body_range_ratio`) remain scaffolded until this lands.
+- **Adjustment basis (consistent split-adjustment; dividends handled
+  via a separate column).** All four stored columns — `close`, `high`,
+  `low`, `volume` — are Yahoo's `chart()` values, **all split-adjusted
+  end-to-end** (NOT mixed-basis, as an earlier draft of this brief
+  said — that was a server-side reasoning error corrected on
+  2026-05-12 and verified empirically against the NVDA 10:1 and
+  TSLA 3:1 splits: no jump on either side of the split day). The
+  new `open` column (server migration done; consumer un-blocked once
+  [PR #10](https://github.com/lore-line/euieInvest-quant/pull/10) merges)
+  is also split-adjusted, so per-bar features that mix close with
+  high/low/open have a **consistent basis** — no split-day distortion.
+  **What's NOT in `close`:** dividends. The new `close_adj` column
+  (same migration as `open`) is Yahoo's native `adjclose` =
+  split + dividend-adjusted. Use `close_adj` for total-return labels
+  and any feature that cares about dividend-inclusive returns. The
+  `(close, close_adj)` divergence is a clean ex-dividend-date detector
+  with no other source of systematic divergence between the two.
+- **`open` column server-side ready, consumer un-blocked on PR #10.**
+  Once `open` lands in /ohlcv, two feature functions in
+  `quant/features/gaps.py` (`gap_pct`, `body_range_ratio`) come
+  off scaffold.
 - **Immutable historicals.** The upstream ETL uses `INSERT OR IGNORE`;
   stored rows are never rewritten. Corporate actions do not trigger a
   re-fetch, so historical adjusted closes only drift if Yahoo's
@@ -248,12 +258,20 @@ rough guess. Therefore:
   stop receiving Yahoo updates. No `delisted_at` column today.
   Win-rate estimates systematically overstate reality until the
   server team adds `/api/v1/symbols` with `status` + `last_seen`.
-- **Mixed adjustment basis.** `close` is split-and-dividend-adjusted
-  (Yahoo `adjClose`); `high`, `low`, `volume` are raw. Return-based
-  features off `close` are clean; intra-bar features that mix close
-  with raw OHLV (gaps, body-vs-range) silently distort on split
-  days. The server team is adding a `close_raw` column in a follow-up
-  so we can opt into a consistent basis.
+- **Dividend handling.** The stored `close` is split-adjusted only
+  (NOT dividend-adjusted). Total-return features must use the new
+  `close_adj` column from the /ohlcv migration tracked in
+  [PR #10](https://github.com/lore-line/euieInvest-quant/pull/10) +
+  the server-side flip. High-dividend names (utilities, REITs, KO,
+  PEP, etc.) will register fractionally more winners when labeled on
+  `close_adj` because the dividend stream adds to total return —
+  expect a small upward shift in the 18.78% positive rate when we
+  re-baseline post-merge.
+- **(Corrected.)** An earlier draft of this caveats list claimed
+  "mixed adjustment basis" (close split+div-adjusted, raw OHLV). That
+  was wrong — all stored columns are consistently split-adjusted. See
+  §4 for the corrected description. Per-bar features mixing close
+  with high/low/volume/open are **not** distorted on split days.
 - **Alpha decay is real.** Anything we find in 2021–2024 may not work in
   2025+. The holdout is our only honest read on this.
 - **Sector confounding.** The 2023–2024 AI tape may dominate winner
