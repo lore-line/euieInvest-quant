@@ -2,7 +2,12 @@
 __pycache__/
 *.pyc
 data/snapshots/*.db
+data/snapshots/*.db-shm
+data/snapshots/*.db-wal
 data/snapshots/*.bak
+data/snapshots/*.parquet
+data/snapshots/cursor.json
+data/snapshots/peer_groups.json
 data/features/*.parquet
 reports/*.png
 reports/*.html
