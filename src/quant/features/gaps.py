@@ -1,10 +1,9 @@
 """Gap and range features.
 
-The current snapshot schema (CLAUDE.md §4) does NOT include an ``open``
-column. Features that intrinsically need ``open`` (overnight gap, body
-ratio) remain scaffolded with NotImplementedError + a clear pointer to
-the upstream change needed; features that only need ``high``, ``low``,
-and ``close`` are implemented.
+All four functions are implemented as of the /ohlcv ``open`` migration
+(see CLAUDE.md §4). ``open``, ``high``, ``low``, ``close`` are all
+split-adjusted on a consistent basis, so per-bar features mixing them
+are not distorted by split days.
 
 Spec: CLAUDE.md §7 (gaps.py).
 """
@@ -18,15 +17,12 @@ __all__ = ["gap_pct", "range_expansion", "body_range_ratio", "inside_bar"]
 def gap_pct(df: pl.DataFrame) -> pl.DataFrame:
     """Add ``gap_pct = (open[t] - close[t-1]) / close[t-1]`` per symbol.
 
-    BLOCKED: ``open`` is not present in the current snapshot schema.
-    Either ask the euieInvest server team to add ``open`` to
-    ``/api/v1/ohlcv`` (additive change, non-breaking per contract §2),
-    or drop this feature from the v1 feature set.
+    Null on the first row per symbol (no prior close).
     """
-    raise NotImplementedError(
-        "src/quant/features/gaps.py: gap_pct — requires 'open' column not "
-        "present in the current snapshot. Request the server team add "
-        "'open' to /api/v1/ohlcv (additive, non-breaking per contract §2)."
+    out = df.sort(["symbol", "date"])
+    prev_close = pl.col("close").shift(1).over("symbol")
+    return out.with_columns(
+        ((pl.col("open") - prev_close) / prev_close).alias("gap_pct")
     )
 
 
@@ -59,11 +55,17 @@ def range_expansion(df: pl.DataFrame, lookback: int = 5) -> pl.DataFrame:
 def body_range_ratio(df: pl.DataFrame) -> pl.DataFrame:
     """Add ``body_range_ratio = |close - open| / (high - low)`` per symbol.
 
-    BLOCKED: same as ``gap_pct`` — needs ``open``.
+    Values near 1 mean a marubozu-style strong-trend bar; near 0 means a
+    doji-style indecision bar. Null when ``high == low`` (no range).
     """
-    raise NotImplementedError(
-        "src/quant/features/gaps.py: body_range_ratio — requires 'open' "
-        "column not present in the current snapshot. See gap_pct() doc."
+    out = df.sort(["symbol", "date"])
+    span = pl.col("high") - pl.col("low")
+    body = (pl.col("close") - pl.col("open")).abs()
+    return out.with_columns(
+        pl.when(span > 0)
+        .then(body / span)
+        .otherwise(None)
+        .alias("body_range_ratio")
     )
 
 

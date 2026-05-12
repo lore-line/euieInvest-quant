@@ -1,18 +1,23 @@
 """Discovery pipeline entrypoint — 5-step orchestrator.
 
-Step 1 (feature engineering) is implemented. Steps 2-5 (supervised
-discovery, clustering, counterfactuals, tier-3 comparison) remain
-scaffolded — see CLAUDE.md §5 for the full methodology.
+Steps 1 and 2 (feature engineering, supervised discovery + SHAP) are
+implemented. Steps 3-5 (clustering, counterfactuals, tier-3 comparison)
+remain scaffolded — see CLAUDE.md §5 for the full methodology.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import subprocess
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 
-from quant.data.loader import load_anomaly_flags, load_ohlcv, load_peer_groups
+from quant.backtest.temporal import split_by_date
+from quant.data.loader import load_ohlcv, load_peer_groups
 from quant.features import (
     behavioral,
     gaps,
@@ -23,6 +28,15 @@ from quant.features import (
     volume,
 )
 from quant.labels import compute_forward_winner_labels
+from quant.models import XGBDiscovery
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Columns excluded from the feature matrix: raw OHLCV (used to derive
+# features but not as features themselves) and the label.
+_NON_FEATURE_COLS: frozenset[str] = frozenset(
+    {"symbol", "date", "open", "high", "low", "close", "close_adj", "volume", "is_winner"}
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -37,6 +51,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("data/features/features.parquet"),
         help="Where to write the joined features + labels parquet",
+    )
+    p.add_argument(
+        "--stop-after",
+        choices=["step1", "step2", "step3", "step4", "step5"],
+        default="step2",
+        help="Run pipeline up to and including this step (default: step2). "
+        "Steps 3-5 are scaffolded; ask before bumping past step2.",
+    )
+    p.add_argument(
+        "--skip-step1",
+        action="store_true",
+        help="Skip feature engineering and reuse the existing features parquet.",
     )
     return p.parse_args(argv)
 
@@ -80,9 +106,10 @@ def _build_features(
     out = momentum.roc(out)
     out = momentum.consecutive_run(out)
 
-    # gaps.py — only range_expansion and inside_bar are implementable
-    # (gap_pct + body_range_ratio need `open` from upstream)
+    # gaps.py — all four functions now implementable (open column landed)
+    out = gaps.gap_pct(out)
     out = gaps.range_expansion(out, lookback=5)
+    out = gaps.body_range_ratio(out)
     out = gaps.inside_bar(out)
 
     # relative.py — vs SPY (full df), vs sector (peer groups), peer z-scores
@@ -111,7 +138,10 @@ def step1_build_features(args: argparse.Namespace) -> pl.DataFrame:
     features = _build_features(ohlcv, spy, peer_groups_dict)
     print(f"  built features: {features.height:,} rows × {features.width} cols")
 
-    labeled = compute_forward_winner_labels(features, lookahead=30, threshold=0.20)
+    # Labels per CLAUDE.md §6 — total-return on close_adj, NOT split-only close.
+    labeled = compute_forward_winner_labels(
+        features, lookahead=30, threshold=0.20, price_col="close_adj"
+    )
     print(f"  labeled: {labeled['is_winner'].sum()} winners "
           f"({100.0 * labeled['is_winner'].sum() / labeled['is_winner'].drop_nulls().len():.2f}% "
           f"of non-null rows)")
@@ -122,11 +152,182 @@ def step1_build_features(args: argparse.Namespace) -> pl.DataFrame:
     return labeled
 
 
+def _feature_columns(df: pl.DataFrame) -> list[str]:
+    return [c for c in df.columns if c not in _NON_FEATURE_COLS]
+
+
+def _git_head_sha() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT, text=True
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
 def step2_supervised_discovery(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "scripts/discover.py:step2_supervised_discovery — train XGBDiscovery "
-        "with scale_pos_weight from train-set imbalance, emit SHAP summary. "
-        "See CLAUDE.md §5 step 2 and §9."
+    """Train XGBClassifier on the train slice, evaluate on the holdout
+    slice ONCE, write three artifacts to ``runs/<date>/``.
+
+    Artifacts (per the reports-repo-layout contract, Step 2 fields):
+    - ``manifest.json`` — run metadata + headline metrics
+    - ``top-decile.parquet`` — holdout rows in the top decile by predicted proba
+    - ``shap-summary.parquet`` — mean-|SHAP| per feature + direction
+    """
+    print("step 2: supervised discovery ...")
+    labeled = pl.read_parquet(args.features_out)
+
+    # Drop rows without a forward label (last 30 per symbol).
+    labeled = labeled.filter(pl.col("is_winner").is_not_null())
+
+    feature_cols = _feature_columns(labeled)
+
+    # XGBoost needs numeric inputs.
+    # - Booleans → int8
+    # - Strings (e.g. market_regime: "uptrend"/"downtrend"/"chop") → one-hot dummies
+    bool_cols = [c for c in feature_cols if labeled[c].dtype == pl.Boolean]
+    if bool_cols:
+        labeled = labeled.with_columns([pl.col(c).cast(pl.Int8) for c in bool_cols])
+
+    str_cols = [c for c in feature_cols if labeled[c].dtype == pl.Utf8]
+    if str_cols:
+        labeled = labeled.to_dummies(columns=str_cols)
+        # to_dummies emits cols named "<col>_<value>" as UInt8 — keep them, drop originals.
+        feature_cols = _feature_columns(labeled)
+
+    print(f"  feature columns: {len(feature_cols)} (str→dummies: {len(str_cols)})")
+
+    train, val, holdout = split_by_date(labeled, args.train_end, args.val_end)
+    print(
+        f"  splits: train={train.height:,} ({train['date'].min()}→{train['date'].max()}) | "
+        f"val={val.height:,} ({val['date'].min()}→{val['date'].max()}) | "
+        f"holdout={holdout.height:,} ({holdout['date'].min()}→{holdout['date'].max()})"
+    )
+
+    # scale_pos_weight from the TRAIN slice only (CLAUDE.md §9).
+    n_pos_train = int(train["is_winner"].sum())
+    n_neg_train = train.height - n_pos_train
+    spw = n_neg_train / max(n_pos_train, 1)
+    print(
+        f"  train balance: {n_pos_train:,} pos / {n_neg_train:,} neg "
+        f"({100.0 * n_pos_train / train.height:.2f}% positive) "
+        f"→ scale_pos_weight={spw:.4f}"
+    )
+
+    X_train = train.select(feature_cols)
+    y_train = train["is_winner"]
+    X_val = val.select(feature_cols)
+    y_val = val["is_winner"]
+    X_holdout = holdout.select(feature_cols)
+    y_holdout = holdout["is_winner"]
+
+    model = XGBDiscovery(scale_pos_weight=spw)
+    print("  fitting XGBClassifier ...")
+    model.fit(X_train, y_train, X_val=X_val, y_val=y_val)
+
+    print("  predicting on holdout ...")
+    holdout_proba = model.predict(X_holdout)
+
+    # Metrics on the holdout (touched ONCE — CLAUDE.md §8).
+    from sklearn.metrics import roc_auc_score  # local import to keep top-level light
+
+    proba_np = holdout_proba.to_numpy()
+    y_np = y_holdout.cast(pl.Boolean).to_numpy()
+
+    auc = float(roc_auc_score(y_np, proba_np))
+
+    n_holdout = len(proba_np)
+    k = max(1, n_holdout // 10)
+    # Partial sort: indices of the k highest probas (in arbitrary order).
+    top_idx = np.argpartition(-proba_np, k - 1)[:k]
+    n_true_in_top = int(y_np[top_idx].sum())
+    n_total_pos = int(y_np.sum())
+    precision_at_topdecile = n_true_in_top / k
+    recall_at_topdecile = n_true_in_top / n_total_pos if n_total_pos else 0.0
+    base_rate = n_total_pos / n_holdout
+    lift = precision_at_topdecile / base_rate if base_rate else float("nan")
+
+    print()
+    print(f"  HOLDOUT METRICS (n={n_holdout:,}, top decile k={k:,})")
+    print(f"    AUC                        = {auc:.4f}")
+    print(
+        f"    precision @ top-decile     = {precision_at_topdecile:.4f}  "
+        f"(base rate {base_rate:.4f}, lift {lift:.2f}x)"
+    )
+    print(f"    recall    @ top-decile     = {recall_at_topdecile:.4f}")
+    print()
+
+    # SHAP on the holdout — that's what tells us what the model leaned on.
+    print("  computing SHAP on holdout ...")
+    shap_df = model.shap_summary(X_holdout)
+    print("  top-10 features by mean-|SHAP|:")
+    for row in shap_df.head(10).iter_rows(named=True):
+        print(f"    {row['feature_name']:<35} {row['mean_abs_shap']:>10.5f}  {row['direction']}")
+    print()
+
+    # ----- Artifacts -----
+    run_dir = _REPO_ROOT / "runs" / date.today().isoformat()
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save model alongside the manifest so its sha can be referenced.
+    model_path = run_dir / "model.json"
+    model._model.save_model(str(model_path))
+    model_sha = hashlib.sha256(model_path.read_bytes()).hexdigest()
+
+    # top-decile.parquet: holdout rows in the top 10% by predicted proba,
+    # sorted (date asc, predicted_proba desc).
+    top_mask = np.zeros(n_holdout, dtype=bool)
+    top_mask[top_idx] = True
+    top_df = (
+        holdout.select(["symbol", "date"])
+        .with_columns(holdout_proba.cast(pl.Float64))
+        .filter(pl.Series(values=top_mask))
+        .sort(["date", "predicted_proba"], descending=[False, True])
+    )
+    topdecile_path = run_dir / "top-decile.parquet"
+    top_df.write_parquet(topdecile_path)
+    print(f"  wrote {topdecile_path.relative_to(_REPO_ROOT)}  ({top_df.height:,} rows)")
+
+    # shap-summary.parquet
+    shap_path = run_dir / "shap-summary.parquet"
+    shap_df.write_parquet(shap_path)
+    print(f"  wrote {shap_path.relative_to(_REPO_ROOT)}  ({shap_df.height} features)")
+
+    # manifest.json — CLAUDE.md §13 + the three new Step 2 fields the
+    # server side reads to surface edge claims.
+    edge_threshold = 0.25  # 25% > 18.94% base; matches the brief's edge bar.
+    pipeline_step = (
+        "step2_supervised_discovery"
+        if precision_at_topdecile >= edge_threshold
+        else "step2_no_edge_found"
+    )
+
+    manifest = {
+        "run_id": f"{date.today().isoformat()}-001",
+        "train_end": args.train_end.isoformat(),
+        "val_end": args.val_end.isoformat(),
+        "holdout_end": str(holdout["date"].max()),
+        "model_sha": f"sha256:{model_sha}",
+        "feature_count": len(feature_cols),
+        "positive_rate_train": round(n_pos_train / train.height, 6),
+        "holdout_precision_at_topdecile": round(precision_at_topdecile, 6),
+        "holdout_recall_at_topdecile": round(recall_at_topdecile, 6),
+        "holdout_auc": round(auc, 6),
+        "holdout_base_rate": round(base_rate, 6),
+        "holdout_n_rows": n_holdout,
+        "holdout_top_decile_k": k,
+        "universe_size": int(labeled["symbol"].n_unique()),
+        "git_commit_of_quant_repo": _git_head_sha(),
+        "pipeline_step": pipeline_step,
+    }
+    manifest_path = run_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"  wrote {manifest_path.relative_to(_REPO_ROOT)}")
+    print()
+    print(
+        f"=== STEP 2 RESULT: precision@top-decile = {precision_at_topdecile*100:.2f}% "
+        f"(base rate {base_rate*100:.2f}%, AUC {auc:.3f}, "
+        f"pipeline_step={pipeline_step}) ==="
     )
 
 
@@ -151,17 +352,32 @@ def step5_tier3_comparison(args: argparse.Namespace) -> None:
     )
 
 
+_STEP_ORDER = ["step1", "step2", "step3", "step4", "step5"]
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    # Sanity-touch anomaly_flags so step 5 has its hands on the baseline
-    # cohort; the actual comparison is deferred to step5_tier3_comparison.
-    _ = load_anomaly_flags()
-    step1_build_features(args)
-    step2_supervised_discovery(args)
-    step3_cluster_winners(args)
-    step4_counterfactuals(args)
-    step5_tier3_comparison(args)
+    stop_idx = _STEP_ORDER.index(args.stop_after)
+
+    if args.skip_step1:
+        if not args.features_out.exists():
+            raise SystemExit(
+                f"--skip-step1 set but {args.features_out} does not exist. "
+                "Run without --skip-step1 once to build it."
+            )
+        print(f"step 1: skipped (reusing {args.features_out})")
+    else:
+        step1_build_features(args)
+
+    if stop_idx >= _STEP_ORDER.index("step2"):
+        step2_supervised_discovery(args)
+    if stop_idx >= _STEP_ORDER.index("step3"):
+        step3_cluster_winners(args)
+    if stop_idx >= _STEP_ORDER.index("step4"):
+        step4_counterfactuals(args)
+    if stop_idx >= _STEP_ORDER.index("step5"):
+        step5_tier3_comparison(args)
 
 
 if __name__ == "__main__":

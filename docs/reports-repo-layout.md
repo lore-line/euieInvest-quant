@@ -49,15 +49,27 @@ state. Fields:
 | `holdout_end` | `YYYY-MM-DD` | inclusive |
 | `model_sha` | string | content-hash of the trained xgb model file |
 | `feature_count` | int | number of feature columns at training time |
-| `positive_rate` | float | empirical `is_winner` rate on the train slice |
+| `positive_rate_train` | float | empirical `is_winner` rate on the train slice |
+| `holdout_precision_at_topdecile` | float | **the headline edge number** — fraction of true winners among the top 10% of holdout rows by predicted probability. Compare against `holdout_base_rate` for lift. |
+| `holdout_recall_at_topdecile` | float | fraction of all holdout winners captured by the top decile |
+| `holdout_auc` | float | ROC-AUC on the holdout |
+| `holdout_base_rate` | float | unconditional `is_winner` rate on holdout — denominator for the "edge vs base" judgement |
+| `holdout_n_rows` | int | size of the holdout slice after dropping last-30-per-symbol nulls |
+| `holdout_top_decile_k` | int | row count of the top decile (≈ `holdout_n_rows // 10`) |
 | `universe_size` | int | distinct symbol count in `price_history` at run time |
 | `git_commit_of_quant_repo` | string | full SHA of the `euieInvest-quant` HEAD when the run started — lets the server bisect feature builds against report deltas |
-| `pipeline_step` | string | which CLAUDE.md §5 step produced this run (e.g. `"step2_supervised_discovery"`, `"step4_counterfactuals"`) |
+| `pipeline_step` | string | which CLAUDE.md §5 step produced this run. Step 2 emits either `"step2_supervised_discovery"` (precision ≥ edge threshold) or `"step2_no_edge_found"` (no edge, parser should flag don't act). Step 4 emits `"step4_counterfactuals"`. |
 
-### `winner-fingerprint.md` (required)
+The four `holdout_*` fields were added 2026-05-12 as required Step 2
+output — they let the server side read edge from `manifest.json`
+without re-running predictions.
+
+### `winner-fingerprint.md` (required when Step 4 has run)
 
 Human-readable verdict per CLAUDE.md §13's verdict format. Includes
-the Phase 2 go/no-go gate result (§14).
+the Phase 2 go/no-go gate result (§14). Not produced by Step 2 runs —
+clustering + counterfactual analysis are prerequisites for a meaningful
+fingerprint narrative.
 
 ### `top-decile.parquet` (required)
 

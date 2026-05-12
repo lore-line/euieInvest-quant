@@ -15,11 +15,15 @@ from quant.features.gaps import (
 
 
 def _build(
-    highs: list[float], lows: list[float], closes: list[float] | None = None
+    highs: list[float],
+    lows: list[float],
+    closes: list[float] | None = None,
+    opens: list[float] | None = None,
 ) -> pl.DataFrame:
     n = len(highs)
     assert len(lows) == n
     c = closes if closes is not None else [(h + l) / 2 for h, l in zip(highs, lows)]
+    o = opens if opens is not None else c
     return pl.DataFrame(
         {
             "symbol": ["A"] * n,
@@ -28,20 +32,45 @@ def _build(
             "high": highs,
             "low": lows,
             "volume": [1000] * n,
+            "open": o,
         }
     )
 
 
-def test_gap_pct_raises_until_open_lands() -> None:
-    df = _build([10.0], [9.0])
-    with pytest.raises(NotImplementedError, match="open"):
-        gap_pct(df)
+def test_gap_pct_up_and_down() -> None:
+    # Day 0: close=10. Day 1: open=11 → +10% gap. Day 2: open=10 from prev close=11 → -9.09% gap.
+    df = _build(
+        highs=[10.5, 11.5, 10.5],
+        lows=[9.5, 10.5, 9.5],
+        closes=[10.0, 11.0, 10.0],
+        opens=[10.0, 11.0, 10.0],
+    )
+    out = gap_pct(df)
+    g = out["gap_pct"].to_list()
+    assert g[0] is None
+    assert g[1] == pytest.approx(0.10)
+    assert g[2] == pytest.approx(-1.0 / 11.0)
 
 
-def test_body_range_ratio_raises_until_open_lands() -> None:
-    df = _build([10.0], [9.0])
-    with pytest.raises(NotImplementedError, match="open"):
-        body_range_ratio(df)
+def test_body_range_ratio_marubozu_vs_doji() -> None:
+    # Marubozu: open=9, close=11, high=11, low=9 → body=range → 1.0
+    # Doji: open=close=10, high=11, low=9 → body=0 → 0.0
+    df = _build(
+        highs=[11.0, 11.0],
+        lows=[9.0, 9.0],
+        closes=[11.0, 10.0],
+        opens=[9.0, 10.0],
+    )
+    out = body_range_ratio(df)
+    r = out["body_range_ratio"].to_list()
+    assert r[0] == pytest.approx(1.0)
+    assert r[1] == pytest.approx(0.0)
+
+
+def test_body_range_ratio_null_when_no_range() -> None:
+    df = _build(highs=[10.0], lows=[10.0], closes=[10.0], opens=[10.0])
+    out = body_range_ratio(df)
+    assert out["body_range_ratio"].to_list() == [None]
 
 
 def test_range_expansion_above_one_on_widening_bar() -> None:
