@@ -49,6 +49,15 @@ The server is acceptable when **all** of the following hold:
 The consumer uses polars/pyarrow already, so picking the same gives you
 identical schema handling.
 
+> ⚠️ **`polars-lts-cpu` on hosts without AVX2.** The default `polars`
+> wheels on PyPI assume an AVX2-capable CPU; on older / virtualized
+> hosts (e.g. claudehost is a Proxmox VM without AVX2 passed through)
+> the process crashes at first import with `Illegal instruction`. Same
+> Python module name (`polars`), just compiled for the older baseline.
+> If you hit this, pin `polars-lts-cpu` instead of `polars` in your
+> server's requirements. The consumer side runs in a CUDA Docker image
+> where AVX2 is always present, so the consumer keeps vanilla `polars`.
+
 Other stacks (Go, Node, Rust) are fine if you have one already wired
 into the trading platform. The contract is language-agnostic; only the
 wire format matters. The contract test suite is the source of truth —
@@ -206,9 +215,16 @@ def peer_groups_hash() -> str:
     """Canonical hash matching contract §5.2."""
     g = peer_groups()
     g = {k: sorted(v) for k, v in g.items()}
-    body = json.dumps(g, sort_keys=True)
+    body = json.dumps(g, sort_keys=True)   # NB: DEFAULT separators, not compact
     return "sha256:" + hashlib.sha256(body.encode()).hexdigest()
 ```
+
+> ⚠️ **Hash canonicalization gotcha.** Use `json.dumps(..., sort_keys=True)`
+> with **default separators** (`, ` and `: `). The first server-side
+> implementation passed `separators=(',', ':')` for compact output and the
+> hash silently diverged from the consumer's expectation — contract test 8
+> (`test_peer_groups_hash_in_cursor_matches_canonicalization`) caught it.
+> If you re-implement the hash on either side, do NOT pass `separators=`.
 
 ### 3.8 Error handler (RFC 7807 problem+json)
 
