@@ -209,6 +209,32 @@ def test_anomaly_flags_returns_parquet_with_required_columns() -> None:
     )
 
 
+# -- /api/v1/symbols ----------------------------------------------------------
+
+
+def test_symbols_returns_per_ticker_metadata() -> None:
+    """Per contract §5.6."""
+    r = httpx.get(f"{_api_base()}/symbols", timeout=30)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    body = r.json()
+    assert isinstance(body, dict)
+    assert len(body) > 0
+    required_keys = {
+        "status", "last_seen", "shares_outstanding", "sector", "listing_date"
+    }
+    for sym, meta in body.items():
+        assert isinstance(sym, str)
+        assert required_keys <= set(meta.keys()), (
+            f"{sym} missing keys: {required_keys - set(meta.keys())}"
+        )
+        assert meta["status"] in {"active", "delisted"}
+        assert date.fromisoformat(meta["last_seen"])
+        if meta["shares_outstanding"] is not None:
+            assert isinstance(meta["shares_outstanding"], int)
+            assert meta["shares_outstanding"] > 0
+
+
 # -- Cross-endpoint invariants ------------------------------------------------
 
 
