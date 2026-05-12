@@ -1,0 +1,29 @@
+[Unit]
+Description=euieInvest read-only quant data API (FastAPI sidecar)
+Documentation=https://github.com/lore-line/euieInvest-quant/blob/feat/api-contract/docs/api-contract.md
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=euie
+Group=euie
+WorkingDirectory=/home/euie/nextcloud/CODE/euieInvest/quant_api
+Environment=PYTHONPATH=/home/euie/nextcloud/CODE/euieInvest/quant_api/src
+Environment=POLARS_SKIP_CPU_CHECK=1
+ExecStart=/home/euie/nextcloud/CODE/euieInvest/quant_api/.venv/bin/python -m uvicorn euieinvest_api.app:app --host 100.68.86.56 --port 8443 --workers 1 --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=euieinvest-quant-api
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/euie/nextcloud/CODE/euieInvest/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
