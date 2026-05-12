@@ -120,6 +120,8 @@ _OHLCV_SCHEMA: dict[str, pl.DataType] = {
     "high": pl.Float64,
     "low": pl.Float64,
     "volume": pl.Int64,
+    "open": pl.Float64,
+    "close_adj": pl.Float64,
 }
 
 
@@ -150,7 +152,10 @@ def ohlcv(
         params.extend(sym_list)
 
     clause = (" WHERE " + " AND ".join(where)) if where else ""
-    sql = f"SELECT symbol, date, close, high, low, volume FROM price_history{clause}"
+    sql = (
+        "SELECT symbol, date, close, high, low, volume, open, close_adj "
+        f"FROM price_history{clause}"
+    )
     rows = db().execute(sql, params).fetchall()
 
     df = pl.DataFrame(
@@ -161,6 +166,8 @@ def ohlcv(
             "high": [r["high"] for r in rows],
             "low": [r["low"] for r in rows],
             "volume": [r["volume"] for r in rows],
+            "open": [r["open"] for r in rows],
+            "close_adj": [r["close_adj"] for r in rows],
         },
         schema=_OHLCV_SCHEMA,
     ).with_columns(pl.col("date").str.strptime(pl.Date, format="%Y-%m-%d"))
@@ -174,6 +181,65 @@ def ohlcv(
 @app.get("/api/v1/peer-groups")
 def peer_groups() -> dict[str, list[str]]:
     return _load_peer_groups(db())
+
+
+# -- /api/v1/symbols ----------------------------------------------------------
+# Contract §5.6. Per-symbol static-ish metadata. Backs the consumer's
+# cap_bucket, market_regime, and survivorship-filter features.
+#
+# `last_seen` is computed live from price_history.MAX(date) so it never
+# diverges from cursor.ohlcv.max_date for active names. `status` is derived:
+# "active" if last_seen is within 7 calendar days of the universe max_date
+# (covers 5 trading days + weekend), else "delisted".
+#
+# `shares_outstanding`, `sector`, `listing_date` come from `symbol_metadata`,
+# populated by fetch-symbol-metadata.mjs. Nulls flow through honestly per
+# spec (ETFs lack sector; pre-listed symbols lack listing_date; etc).
+
+_DELISTED_THRESHOLD_DAYS = 7
+
+
+@app.get("/api/v1/symbols")
+def symbols() -> dict[str, dict[str, object]]:
+    conn = db()
+    rows = conn.execute(
+        """
+        SELECT ph.symbol,
+               MAX(ph.date) AS last_seen,
+               sm.shares_outstanding,
+               sm.sector,
+               sm.listing_date
+        FROM price_history ph
+        LEFT JOIN symbol_metadata sm ON sm.symbol = ph.symbol
+        GROUP BY ph.symbol
+        """
+    ).fetchall()
+
+    universe_max = conn.execute(
+        "SELECT MAX(date) FROM price_history"
+    ).fetchone()[0]
+    universe_max_dt = (
+        date.fromisoformat(universe_max) if universe_max else None
+    )
+
+    out: dict[str, dict[str, object]] = {}
+    for r in rows:
+        last_seen_str = r["last_seen"]
+        last_seen_dt = date.fromisoformat(last_seen_str) if last_seen_str else None
+
+        status = "delisted"
+        if universe_max_dt and last_seen_dt:
+            age = (universe_max_dt - last_seen_dt).days
+            status = "active" if age <= _DELISTED_THRESHOLD_DAYS else "delisted"
+
+        out[r["symbol"]] = {
+            "status": status,
+            "last_seen": last_seen_str,
+            "shares_outstanding": r["shares_outstanding"],
+            "sector": r["sector"],
+            "listing_date": r["listing_date"],
+        }
+    return out
 
 
 # -- /api/v1/anomaly-flags ----------------------------------------------------

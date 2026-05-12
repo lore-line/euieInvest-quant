@@ -40,6 +40,18 @@ def test_ohlcv_parquet() -> None:
     assert r.headers["content-type"] == "application/vnd.apache.parquet"
 
 
+def test_ohlcv_includes_open_and_close_adj() -> None:
+    import polars as pl
+    from io import BytesIO
+
+    r = client.get("/api/v1/ohlcv?symbols=AAPL&since=2024-06-05&until=2024-06-10")
+    df = pl.read_parquet(BytesIO(r.content))
+    assert "open" in df.columns
+    assert "close_adj" in df.columns
+    assert df.schema["open"] == pl.Float64
+    assert df.schema["close_adj"] == pl.Float64
+
+
 def test_ohlcv_too_many_symbols() -> None:
     long_list = ",".join(f"X{i}" for i in range(5001))
     r = client.get(f"/api/v1/ohlcv?symbols={long_list}")
@@ -50,3 +62,27 @@ def test_ohlcv_too_many_symbols() -> None:
 def test_anomaly_flags() -> None:
     r = client.get("/api/v1/anomaly-flags")
     assert r.status_code == 200
+
+
+def test_symbols_returns_per_ticker_metadata() -> None:
+    """Per consumer's fixture in contract §5.6."""
+    from datetime import date as _date
+
+    r = client.get("/api/v1/symbols")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+
+    body = r.json()
+    assert isinstance(body, dict)
+    assert len(body) > 0
+
+    for sym, meta in body.items():
+        assert isinstance(sym, str)
+        assert set(meta.keys()) >= {
+            "status", "last_seen", "shares_outstanding", "sector", "listing_date"
+        }
+        assert meta["status"] in {"active", "delisted"}
+        assert _date.fromisoformat(meta["last_seen"])
+        if meta["shares_outstanding"] is not None:
+            assert isinstance(meta["shares_outstanding"], int)
+            assert meta["shares_outstanding"] > 0
