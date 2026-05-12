@@ -65,8 +65,21 @@ The local cache lives under `data/snapshots/`:
   script, consumed by future incremental syncs
 
 These are refreshed by `scripts/pull-via-api.py`, which calls
-euieInvest's `/api/v1/{ohlcv,peer-groups,anomaly-flags,snapshot-cursor,health}`
+euieInvest's `/api/v1/{ohlcv,peer-groups,anomaly-flags,snapshot-cursor,health,symbols}`
 endpoints. The canonical wire contract is `docs/api-contract.md`.
+
+`/api/v1/symbols` (contract §5.6, shipped 2026-05-12) returns per-symbol
+static-ish metadata: `status`, `last_seen`, `shares_outstanding`,
+`sector`, `listing_date`. Backs the `cap_bucket` and `market_regime`
+features plus survivorship filtering. Two caveats baked into the spec:
+**(a) `status` is uniformly `active` today** — the discovery pipeline
+keeps every tracked symbol fresh, so truly-delisted names never enter
+`price_history` (the §11 survivorship caveat still holds; `last_seen`
+is the honest signal if drift starts). **(b) `shares_outstanding` is
+current, not point-in-time**: `cap_bucket` for a 2021 row uses today's
+shares × that day's close, the agreed-upon approximation from §5.6's
+fallback clause. `sector` is null on ~7 ETFs/index trackers (SPY, QQQ,
+etc.) — feature code must handle nullable-sector (skip-or-bucket-as-Unknown).
 
 `price_history` covers 2021-05-12 → 2026-05-11 (5y, ~2.43M rows, ~2,046
 symbols). `anomaly_flags` is the live trading-platform flag log
@@ -176,13 +189,19 @@ live table grows fast, (2) if we want a Phase 2 gate decision sooner.
 
 ## 6. Target definition (exact)
 
-Primary label, computed per row by `src/quant/labels.py`:
+Primary label, computed per row by `src/quant/labels.py` against
+**`close_adj`** (split + dividend-adjusted total return per §4):
 
 ```
-is_winner[t] := (max(close[t+1 .. t+30]) / close[t]) >= 1.20
+is_winner[t] := (max(close_adj[t+1 .. t+30]) / close_adj[t]) >= 1.20
 ```
 
-Last 30 rows per symbol have null `is_winner`.
+Last 30 rows per symbol have null `is_winner`. `src/quant/labels.py`
+operates on whichever column is named `close` in the input DataFrame;
+callers must rename `close_adj → close` before passing in (or update
+the function to take a column name). Today `discover.py` still passes
+raw `close`; that's a code follow-up, not a spec change. The label
+**spec is `close_adj`**, full stop.
 
 Three comparison variants to run side-by-side at the analysis stage:
 
@@ -230,17 +249,20 @@ Holdout: 2025-01-01 → today   (touched ONCE at the end)
 
 ## 9. Class imbalance
 
-Winners are **~18.78% of non-null rows** at the +20%/30d threshold,
-per Step 1's smoke run on the live snapshot (2,431,188 rows → 445,108
-winners). The bootstrap brief estimated 4–7%; that turned out to be a
-rough guess. Therefore:
+Winners are **~18.96% of non-null rows** at the +20%/30d threshold on
+the `close_adj` (total-return) label, per the 2026-05-12 rebaseline on
+the live snapshot (2,431,189 rows → 449,387 winners across 2,369,842
+non-null rows). The bootstrap brief estimated 4–7%; that turned out to
+be a rough guess. The prior figure (18.78%, on `close`) is documented
+here for traceability — see §11 for the +0.18 pp drift breakdown.
+Therefore:
 
-- `scale_pos_weight ≈ 4.3` for the train set (not 14–23 as the brief
+- `scale_pos_weight ≈ 4.27` for the train set (not 14–23 as the brief
   assumed). Recompute exactly per the train slice.
 - **Report** precision@top-decile AND recall, not accuracy/F1 alone.
 - The discovery question is "what does the top-decile predicted-positive
   cohort look like", not "did the model beat 50% accuracy".
-- 18.78% is higher than typical price-discovery setups. Sanity check
+- 18.96% is higher than typical price-discovery setups. Sanity check
   before training: confirm the label spec in §6 still feels right;
   it's the threshold + lookahead that drives this number.
 
@@ -262,11 +284,17 @@ rough guess. Therefore:
   (NOT dividend-adjusted). Total-return features must use the new
   `close_adj` column from the /ohlcv migration tracked in
   [PR #10](https://github.com/lore-line/euieInvest-quant/pull/10) +
-  the server-side flip. High-dividend names (utilities, REITs, KO,
-  PEP, etc.) will register fractionally more winners when labeled on
-  `close_adj` because the dividend stream adds to total return —
-  expect a small upward shift in the 18.78% positive rate when we
-  re-baseline post-merge.
+  the server-side flip (now merged + deployed). **Rebaseline (2026-05-12):**
+  positive rate on `close_adj` is **18.9627%** (449,387 / 2,369,842),
+  vs **18.7822%** (445,108 / 2,369,842) on `close` — a **+0.18 pp**
+  upward drift, well within the predicted "fractional, not structural"
+  range. Net 4,319 → winner flips, 40 → non-winner flips; lift
+  concentrates on high-yield REITs (BXMT, RPT), shipping/MLP-style
+  payers (LPG, GNK, FLNG), and small-cap banks (LKFN, BCC) as
+  expected. One outlier — `DEC` with 604 flips — is worth a spot
+  check against Yahoo's `adjclose` series; concentrating 14% of all
+  flip-to-winner volume in a single ticker is suspicious but doesn't
+  move the aggregate. See PR #1, 2026-05-12 comment for full table.
 - **(Corrected.)** An earlier draft of this caveats list claimed
   "mixed adjustment basis" (close split+div-adjusted, raw OHLV). That
   was wrong — all stored columns are consistently split-adjusted. See
