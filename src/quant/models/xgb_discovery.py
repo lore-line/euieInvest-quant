@@ -12,6 +12,7 @@ Thin wrapper around ``xgboost.XGBClassifier`` that:
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -70,6 +71,7 @@ class XGBDiscovery:
     params: dict[str, Any] = field(default_factory=dict)
     _model: xgb.XGBClassifier | None = field(default=None, init=False, repr=False)
     _feature_names: list[str] = field(default_factory=list, init=False, repr=False)
+    _train_wall_clock_s: float | None = field(default=None, init=False, repr=False)
 
     def _resolved_params(self) -> dict[str, Any]:
         merged = {**_DEFAULT_PARAMS, **self.params}
@@ -96,8 +98,31 @@ class XGBDiscovery:
             eval_set = [(X_val_np, y_val_np)]
 
         self._model = xgb.XGBClassifier(**self._resolved_params())
+        t0 = time.perf_counter()
         self._model.fit(X_np, y_np, eval_set=eval_set, verbose=False)
+        self._train_wall_clock_s = time.perf_counter() - t0
         return self
+
+    @property
+    def train_wall_clock_s(self) -> float | None:
+        """Wall-clock seconds spent inside the last ``fit()`` call (excluding
+        data prep / NaN coercion / eval-set materialization)."""
+        return self._train_wall_clock_s
+
+    @property
+    def runtime_device(self) -> str:
+        """Device the fitted booster is on — ``"cuda:N"`` or ``"cpu"``.
+
+        Source of truth is the trained booster's params (not the requested
+        params), so this attests to what actually happened, not what was
+        asked for. XGBoost silently falls back to CPU when CUDA isn't
+        available; that fallback shows up here.
+        """
+        if self._model is None:
+            raise RuntimeError("XGBDiscovery.runtime_device called before fit")
+        cfg = self._model.get_booster().save_config()
+        import json as _json
+        return _json.loads(cfg)["learner"]["generic_param"].get("device", "unknown")
 
     def predict(self, X: pl.DataFrame) -> pl.Series:
         """Return predicted P(is_winner) per row, as a polars Series."""

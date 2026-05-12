@@ -59,9 +59,12 @@ state. Fields:
 | `universe_size` | int | distinct symbol count in `price_history` at run time |
 | `git_commit_of_quant_repo` | string | full SHA of the `euieInvest-quant` HEAD when the run started — lets the server bisect feature builds against report deltas |
 | `pipeline_step` | string | which CLAUDE.md §5 step produced this run. Step 2 emits either `"step2_supervised_discovery"` (precision ≥ edge threshold) or `"step2_no_edge_found"` (no edge, parser should flag don't act). Step 4 emits `"step4_counterfactuals"`. |
+| `runtime_device` | string | device the fitted booster was on, sourced from the booster's `save_config()` after `fit()`. `"cuda:0"` on heaven-pc; `"cpu"` would surface a silent CUDA fallback. |
+| `train_wall_clock_s` | float | wall-clock seconds inside `XGBClassifier.fit()` (excludes data prep). A 5090 trains the +20%/30d label on ~1.2M × 47 features in single-digit seconds; CPU fallback would push this 1-2 orders of magnitude up. |
 
-The four `holdout_*` fields were added 2026-05-12 as required Step 2
-output — they let the server side read edge from `manifest.json`
+The four `holdout_*` fields + the two runtime self-attestation fields
+were added 2026-05-12 as required Step 2 output — they let the server
+side read edge and verify the run came off the expected hardware
 without re-running predictions.
 
 ### `winner-fingerprint.md` (required when Step 4 has run)

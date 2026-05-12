@@ -319,6 +319,11 @@ def step2_supervised_discovery(args: argparse.Namespace) -> None:
         "universe_size": int(labeled["symbol"].n_unique()),
         "git_commit_of_quant_repo": _git_head_sha(),
         "pipeline_step": pipeline_step,
+        # Self-attestation: where fit() actually ran and how long it took.
+        # Sourced from the trained booster's save_config(), so a silent
+        # CUDA→CPU fallback would surface here as device="cpu".
+        "runtime_device": model.runtime_device,
+        "train_wall_clock_s": round(model.train_wall_clock_s or 0.0, 3),
     }
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
