@@ -1,0 +1,11 @@
+.git
+data/snapshots/*.db
+data/snapshots/*.bak
+data/features/*.parquet
+reports/*
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache

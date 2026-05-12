@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+data/snapshots/*.db
+data/snapshots/*.bak
+data/features/*.parquet
+reports/*.png
+reports/*.html
+.env
+.DS_Store
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
