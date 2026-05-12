@@ -1,7 +1,12 @@
-"""Tests for quant.data.loader using a synthetic SQLite fixture.
+"""Tests for quant.data.loader's legacy SQLite fallback path.
 
 Never touches the actual snapshot — builds a tiny database in tmp_path
-with the real schema and points EUIEINVEST_SNAPSHOT at it.
+with the real schema and points the loader at it via both
+``EUIEINVEST_SNAPSHOT_DIR`` (so the parquet check finds nothing) and
+``EUIEINVEST_SNAPSHOT`` (the legacy file path).
+
+The parquet-preferred path is covered separately in
+``tests/test_loader_parquet.py``.
 """
 from __future__ import annotations
 
@@ -62,6 +67,9 @@ def tiny_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         con.commit()
     finally:
         con.close()
+    # Point both env vars at tmp_path so the parquet check sees no files
+    # and the loader falls through to the SQLite path.
+    monkeypatch.setenv("EUIEINVEST_SNAPSHOT_DIR", str(tmp_path))
     monkeypatch.setenv("EUIEINVEST_SNAPSHOT", str(db_path))
     return db_path
 
@@ -117,6 +125,7 @@ def test_read_only_mode(tiny_snapshot: Path) -> None:
 def test_missing_snapshot_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from quant.data.loader import load_ohlcv
 
+    monkeypatch.setenv("EUIEINVEST_SNAPSHOT_DIR", str(tmp_path))
     monkeypatch.setenv("EUIEINVEST_SNAPSHOT", str(tmp_path / "does-not-exist.db"))
-    with pytest.raises(FileNotFoundError, match="pull-snapshot"):
+    with pytest.raises(FileNotFoundError, match="pull-via-api"):
         load_ohlcv()

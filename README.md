@@ -19,9 +19,13 @@ Prereqs: Docker Desktop + NVIDIA Container Toolkit + any CUDA 12.8+ capable
 GPU. Verified on **heaven-pc** with RTX 5090 (Blackwell sm_120).
 
 ```sh
-# 1. Pull the snapshot from claudehost over Tailscale
+# 1. Pull the snapshot
+# Preferred (once the data API is live on claudehost):
+EUIEINVEST_API_BASE_URL=http://100.68.86.56:8443 \
+  docker compose run --rm dev python scripts/pull-via-api.py
+
+# Legacy fallback (rsync the SQLite file directly):
 bash   scripts/pull-snapshot.sh        # WSL2 / Linux / Git Bash
-# OR
 .\scripts\pull-snapshot.ps1            # native PowerShell
 
 # 2. Build the image
@@ -35,6 +39,10 @@ docker compose run --rm dev nvidia-smi
 docker compose run --rm discover       # raises NotImplementedError until
                                         # the feature modules are filled in
 ```
+
+The loader prefers parquet/JSON files in `data/snapshots/` (written by
+`pull-via-api.py`) and transparently falls back to the legacy
+`euieinvest.db` SQLite snapshot if those aren't present.
 
 ## Native fallback (no Docker)
 
