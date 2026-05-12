@@ -321,12 +321,15 @@ observed in the prod snapshot):
 Columns added in future server versions are non-breaking; clients select
 columns by name and ignore extras.
 
-### 5.6 `GET /api/v1/symbols` — **[DRAFT — pending server implementation]**
+### 5.6 `GET /api/v1/symbols`
 
-> **Status**: consumer-team-decided 2026-05-12, not yet implemented on the
-> server side. This section is the agreed-on shape; the server team builds
-> when ready, then flips this section's status to "shipped". Linked
-> discussion: PR #1, comment by `lore-line` 2026-05-12.
+> **Status**: shipped 2026-05-12 on `100.68.86.56:8443`. Backed by the
+> trading platform's `symbol_metadata` table (lore-line/euieInvest
+> commit [`bfb19b3`](https://github.com/lore-line/euieInvest/commit/bfb19b3)).
+> `last_seen` and `status` are derived live from `price_history`;
+> `shares_outstanding` / `sector` / `listing_date` come from a daily Yahoo
+> `quoteSummary` refresh. Linked discussion: PR #1, comment by `lore-line`
+> 2026-05-12.
 
 Returns per-symbol static-ish metadata. Used by the consumer's
 `cap_bucket` and `market_regime` feature modules, plus survivorship
@@ -468,3 +471,4 @@ Non-binding suggestions for whoever builds the server:
 | 1.0.0 | 2026-05-12 | Server implementation shipped on claudehost (`100.68.86.56:8443`); 11/11 contract tests pass. Status-enum text in §5.5 corrected from `{open,…}` to `{active,entered,…}` to match the actual trading-platform DB state machine (additive clarification only — no wire-format change). |
 | 1.1.0 | 2026-05-12 | §5.3 adds `open` (split-adjusted) and `close_adj` (split + dividend-adjusted) to the /ohlcv response. Additive per §2 — clients selecting columns by name continue to work unchanged. Adjustment-basis paragraph added to §5.3 documenting that all six numeric columns are consistently split-adjusted (the earlier "mixed basis" caveat was incorrect; verified empirically against NVDA 10:1 and TSLA 3:1 splits). |
 | 1.2.0-draft | 2026-05-12 | New §5.6 `GET /api/v1/symbols` (DRAFT) added. Per-symbol static-ish metadata: status, last_seen, shares_outstanding, sector, listing_date. Consumer derives point-in-time `market_cap[t] = close[t] × shares_outstanding`. Not yet implemented server-side; section will move from `1.2.0-draft` to `1.2.0` when shipped. |
+| 1.2.0 | 2026-05-12 | §5.6 `GET /api/v1/symbols` shipped on `100.68.86.56:8443`. 2,046 symbols populated; 2,039 with sector, 2,036 with shares_outstanding, 2,046 with listing_date. Current universe is all `status=active` (the discovery pipeline keeps every tracked symbol fresh — no truly-delisted names linger in `price_history`). Server-side impl: lore-line/euieInvest commit `bfb19b3`. Local smoke test `test_symbols_returns_per_ticker_metadata` matches the fixture in the original draft. |
