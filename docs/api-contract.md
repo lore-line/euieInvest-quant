@@ -255,8 +255,23 @@ Returns rows from the doctrine's `anomaly_flags` table.
 | Param | Type | Default | Notes |
 |---|---|---|---|
 | `since` | `YYYY-MM-DDTHH:MM:SSZ` | none | If set, return rows with `flag_date >= since`. |
-| `status` | csv of `open\|invalidated\|exited\|dismissed` | none (all) | Filter by status. |
+| `status` | csv of `active\|invalidated\|entered\|exited\|dismissed` | none (all) | Filter by status. See state-machine note below. |
 | `format` | `parquet` \| `ndjson` | `parquet` | See §4.1. |
+
+**`status` state-machine values** (drift-corrected 2026-05-12 vs. initial
+draft):
+
+- `active` — flag is currently in scope but no position has been
+  opened. (The initial draft of this spec called this state `open` —
+  the actual trading-platform DB uses `active`. Consumers filtering by
+  status MUST use `active`, not `open`, or they will silently match
+  zero rows.)
+- `entered` — position has been opened on the flag.
+- `exited` — position has been closed (see `exit_reason`).
+- `invalidated` — pre-entry, the setup broke before a position was
+  opened (e.g., pivot violated).
+- `dismissed` — manually dismissed by an operator (see
+  `dismissed_until` for re-eligibility).
 
 **Response 200**: parquet (or NDJSON). Columns (full 22-col superset as
 observed in the prod snapshot):
@@ -356,3 +371,4 @@ Non-binding suggestions for whoever builds the server:
 | Version | Date | Changes |
 |---|---|---|
 | 1.0.0-draft | 2026-05-12 | Initial draft. Not yet implemented on server. |
+| 1.0.0 | 2026-05-12 | Server implementation shipped on claudehost (`100.68.86.56:8443`); 11/11 contract tests pass. Status-enum text in §5.5 corrected from `{open,…}` to `{active,entered,…}` to match the actual trading-platform DB state machine (additive clarification only — no wire-format change). |
