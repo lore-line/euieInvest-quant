@@ -10,11 +10,17 @@ Read this first. Every session.
 that run **+20% in 30 trading days**. Let the data tell us what winners
 share — do NOT bias the feature set toward any prior doctrine.
 
-A previous hand-crafted "Tier-3 anomaly" doctrine (volume breakout + trend +
-persistence + cluster) was backtested on this exact dataset (Russell 2000 ∪
-watchlist, 5y, 2,046 symbols, ~2.43M bars) and produced only **+0.4% alpha**
-vs SPY across **641 flags**. That doctrine is the **baseline cohort to
-beat** in Step 5 — not a prior we encode into features.
+A hand-crafted "Tier-3 anomaly" doctrine (volume breakout + trend +
+persistence + cluster) **runs live** on the trading platform on
+`claudehost`. The universe is **S&P 500 ∪ NDX 100 ∪ user watchlist ∪
+discovery candidate pool** (~2,046 distinct symbols over 5y, ~2.43M
+bars). An earlier project brief mentioned 641 historical doctrine
+flags — that figure was a **backtest projection** that never wrote to
+the `anomaly_flags` table. The live table is seeded 2026-05-12 with a
+single open flag (SMCI) and accumulates at ~0–2 signals/week as the
+doctrine warms up. **Pre-2026-05-12 has no baseline cohort to compare
+against.** Step 5 (CLAUDE.md §5) must be designed around the
+live-trickle reality, not the backtest count — see §5 notes below.
 
 ## 2. Hardware
 
@@ -63,9 +69,61 @@ euieInvest's `/api/v1/{ohlcv,peer-groups,anomaly-flags,snapshot-cursor,health}`
 endpoints. The canonical wire contract is `docs/api-contract.md`.
 
 `price_history` covers 2021-05-12 → 2026-05-11 (5y, ~2.43M rows, ~2,046
-symbols). `anomaly_flags` is the prior hand-crafted doctrine's flag log,
-treated as a **baseline cohort** to beat in Step 5 — not as a feature
-source.
+symbols). `anomaly_flags` is the live trading-platform flag log
+(seeded 2026-05-12 with the first real signal). Treated as a
+**baseline cohort to beat** in Step 5 — not as a feature source. There
+is no pre-2026-05-12 history; see §1.
+
+**Data-shape gotchas (load-bearing — confirmed with the trading-platform team 2026-05-12):**
+
+- **Adjustment basis (consistent split-adjustment; dividends handled
+  via a separate column).** All four stored columns — `close`, `high`,
+  `low`, `volume` — are Yahoo's `chart()` values, **all split-adjusted
+  end-to-end** (NOT mixed-basis, as an earlier draft of this brief
+  said — that was a server-side reasoning error corrected on
+  2026-05-12 and verified empirically against the NVDA 10:1 and
+  TSLA 3:1 splits: no jump on either side of the split day). The
+  new `open` column (server migration done; consumer un-blocked once
+  [PR #10](https://github.com/lore-line/euieInvest-quant/pull/10) merges)
+  is also split-adjusted, so per-bar features that mix close with
+  high/low/open have a **consistent basis** — no split-day distortion.
+  **What's NOT in `close`:** dividends. The new `close_adj` column
+  (same migration as `open`) is Yahoo's native `adjclose` =
+  split + dividend-adjusted. Use `close_adj` for total-return labels
+  and any feature that cares about dividend-inclusive returns. The
+  `(close, close_adj)` divergence is a clean ex-dividend-date detector
+  with no other source of systematic divergence between the two.
+- **`open` column server-side ready, consumer un-blocked on PR #10.**
+  Once `open` lands in /ohlcv, two feature functions in
+  `quant/features/gaps.py` (`gap_pct`, `body_range_ratio`) come
+  off scaffold.
+- **Immutable historicals.** The upstream ETL uses `INSERT OR IGNORE`;
+  stored rows are never rewritten. Corporate actions do not trigger a
+  re-fetch, so historical adjusted closes only drift if Yahoo's
+  stored splits change. Treat as immutable; reproducible enough for
+  backtesting without point-in-time snapshots.
+- **Survivorship bias is present.** Delisted symbols stay in
+  `price_history` but stop receiving Yahoo updates. No `delisted_at`
+  column today. The server team is adding `/api/v1/symbols` with
+  `status` + `last_seen` so we can filter / weight. Until then,
+  treat win-rate estimates as systematically optimistic — see §11.
+- **Update cadence: daily batch.** `fetch-prices.mjs` runs weekdays
+  at 11:00 UTC (07:00 ET), writing EOD prices. NOT intraday.
+  Schedule `scripts/pull-via-api.py` after that window. The
+  `/snapshot-cursor` endpoint's `as_of` is server wall-clock at
+  request time, not data-batch time.
+- **Time zones.** `price_history.date` and `anomaly_flags.flag_date`
+  are **exchange-local trading dates** (ET, NYSE/NASDAQ). The
+  `*_at` timestamps in `anomaly_flags` are **UTC** with explicit `Z`.
+  All listings USD; no non-USD symbols.
+- **`anomaly_flags.status` enum (drift-corrected).** Actual DB values
+  are `{active, invalidated, entered, exited, dismissed}`. The
+  initial contract draft listed `open` instead of `active`. Code
+  filtering by status must use `active`. See `docs/api-contract.md`
+  §5.5 for the full state machine.
+- **`peer_groups` membership.** Currently 6 groups, 33 entries total:
+  `ai_infra`, `cybersec`, `hyperscaler`, `semicap`, `software_ai`,
+  `fintech_rails`. Small dict, refetch on every cursor change.
 
 **Legacy fallback** (during cutover): if the parquet/JSON files are
 absent, `quant.data.loader` transparently reads a local SQLite snapshot
@@ -81,9 +139,12 @@ removed after the API is verified live in prod for ≥ 1 week — see
 and let SHAP cull.
 
 **Step 2: Supervised discovery.** XGBoost binary classifier with
-`scale_pos_weight = #negatives / #positives` (winners are ~4–7%). Train
-on 2021-05-12 → 2023-12-31, validate on 2024, **freeze before touching
-2025**. SHAP summary identifies the high-signal features.
+`scale_pos_weight = #negatives / #positives`. The brief originally
+estimated winners at ~4–7% — Step 1's smoke run on the live snapshot
+gave **18.78%** non-null positive rate (so `scale_pos_weight ≈ 4.3`,
+not ~14–23 as the brief assumed). Train on 2021-05-12 → 2023-12-31,
+validate on 2024, **freeze before touching 2025**. SHAP summary
+identifies the high-signal features.
 
 **Step 3: Unsupervised winner clustering.** KMeans on the winner-only
 subset for k ∈ {3, 5, 8}; pick best by silhouette score. Each cluster is a
@@ -93,10 +154,25 @@ candidate "fingerprint shape".
 closest non-winners in feature space. The delta isolates *which* features
 flipped the outcome.
 
-**Step 5: Tier-3 doctrine comparison.** Overlap, recall, and missed-winner
-analysis vs `anomaly_flags`. Hard question: does ML find winners the
-hand-crafted doctrine missed, and does it filter out the doctrine's false
-positives?
+**Step 5: Tier-3 doctrine comparison.** Live `anomaly_flags` is
+~empty (1 row as of 2026-05-12; ~0–2/week incoming). Pre-2026-05-12
+has zero baseline cohort. The original Step 5 design (overlap +
+recall + missed-winner analysis vs hundreds of historical flags) is
+**not viable** until the table accumulates more signal. Two
+recommended redesigns:
+
+1. **Forward overlap only.** Run the ML pipeline daily after the
+   2026-05-12 cutoff; record for each new doctrine flag whether the
+   ML top-decile cohort already flagged it earlier. Tracks
+   ML→doctrine lead time. Useful but slow to evaluate.
+2. **Re-simulate the doctrine** in this repo as a deterministic
+   rule-based "shadow" cohort over the full 5y. Compare ML
+   top-decile vs that synthetic cohort on the same 2025 holdout. Not
+   the trading platform's actual doctrine — a re-implementation we
+   own. Faster to evaluate but introduces a re-implementation risk.
+
+Decision deferred to when Step 5 is implemented; pick (1) if the
+live table grows fast, (2) if we want a Phase 2 gate decision sooner.
 
 ## 6. Target definition (exact)
 
@@ -154,12 +230,19 @@ Holdout: 2025-01-01 → today   (touched ONCE at the end)
 
 ## 9. Class imbalance
 
-Winners are ~4–7% of rows. Therefore:
+Winners are **~18.78% of non-null rows** at the +20%/30d threshold,
+per Step 1's smoke run on the live snapshot (2,431,188 rows → 445,108
+winners). The bootstrap brief estimated 4–7%; that turned out to be a
+rough guess. Therefore:
 
-- XGBoost uses `scale_pos_weight = #negatives / #positives` from the train set.
+- `scale_pos_weight ≈ 4.3` for the train set (not 14–23 as the brief
+  assumed). Recompute exactly per the train slice.
 - **Report** precision@top-decile AND recall, not accuracy/F1 alone.
 - The discovery question is "what does the top-decile predicted-positive
   cohort look like", not "did the model beat 50% accuracy".
+- 18.78% is higher than typical price-discovery setups. Sanity check
+  before training: confirm the label spec in §6 still feels right;
+  it's the threshold + lookahead that drives this number.
 
 ## 10. Target leakage — defend against it
 
@@ -171,14 +254,38 @@ Winners are ~4–7% of rows. Therefore:
 
 ## 11. Honest caveats
 
-- **Survivorship bias.** Yahoo Finance does not serve cleanly-delisted
-  names; the universe is *survivors*. We will systematically over-estimate
-  win rates.
+- **Survivorship bias.** Delisted symbols stay in `price_history` but
+  stop receiving Yahoo updates. No `delisted_at` column today.
+  Win-rate estimates systematically overstate reality until the
+  server team adds `/api/v1/symbols` with `status` + `last_seen`.
+- **Dividend handling.** The stored `close` is split-adjusted only
+  (NOT dividend-adjusted). Total-return features must use the new
+  `close_adj` column from the /ohlcv migration tracked in
+  [PR #10](https://github.com/lore-line/euieInvest-quant/pull/10) +
+  the server-side flip. High-dividend names (utilities, REITs, KO,
+  PEP, etc.) will register fractionally more winners when labeled on
+  `close_adj` because the dividend stream adds to total return —
+  expect a small upward shift in the 18.78% positive rate when we
+  re-baseline post-merge.
+- **(Corrected.)** An earlier draft of this caveats list claimed
+  "mixed adjustment basis" (close split+div-adjusted, raw OHLV). That
+  was wrong — all stored columns are consistently split-adjusted. See
+  §4 for the corrected description. Per-bar features mixing close
+  with high/low/volume/open are **not** distorted on split days.
 - **Alpha decay is real.** Anything we find in 2021–2024 may not work in
   2025+. The holdout is our only honest read on this.
 - **Sector confounding.** The 2023–2024 AI tape may dominate winner
   clusters. Step 4 counterfactuals should partial out the obvious
   AI-adjacent bias.
+- **Live-doctrine target leakage (theoretical).** The hand-crafted
+  doctrine on claudehost is now live (`anomaly_flags` table is the
+  trading platform's actual state, not a backtest). When the doctrine
+  exits a position, that close + volume ends up in `price_history`
+  for the next bar. At today's signal volume (1 row total) this is
+  noise. If the doctrine scales meaningfully, feature data downstream
+  of doctrine-driven trades will reflect the doctrine's own exits.
+  Worth re-checking before each training run if signal volume has
+  grown.
 
 ## 12. NOT building yet
 

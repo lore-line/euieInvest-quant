@@ -35,13 +35,25 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+import httpx
 
 from quant.data import api_client
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_SNAPSHOT_DIR = _REPO_ROOT / "data" / "snapshots"
+
+# Server is currently a user-level systemd unit on claudehost; without
+# `loginctl enable-linger euie` it can drop briefly after a host
+# reboot. Retry ONCE on a clean connection failure before bailing, so
+# routine cron runs survive the gap. This is intentionally a single
+# retry — repeated failures should bubble up and page someone, not
+# loop silently.
+_CONNECT_RETRIES = 1
+_CONNECT_RETRY_DELAY_S = 5.0
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -63,6 +75,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _health_with_retry() -> dict:
+    """Probe /health, retrying once on a clean connection failure.
+
+    See _CONNECT_RETRIES rationale above. We use /health as the canary
+    because it's the cheapest endpoint and any infra-level problem
+    will surface here before we ask for parquet bytes.
+    """
+    attempts = _CONNECT_RETRIES + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return api_client.fetch_health()
+        except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as exc:
+            if attempt >= attempts:
+                raise
+            print(
+                f"  health: connection failed ({type(exc).__name__}), "
+                f"retrying in {_CONNECT_RETRY_DELAY_S}s "
+                f"(attempt {attempt}/{attempts})",
+            )
+            time.sleep(_CONNECT_RETRY_DELAY_S)
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     out = args.snapshot_dir
@@ -70,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Pulling from {api_client._base_url()}")
 
-    health = api_client.fetch_health()
+    health = _health_with_retry()
     print(
         f"  health: status={health['status']} "
         f"service={health['service']} v{health['service_version']}"
