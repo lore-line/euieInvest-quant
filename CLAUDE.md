@@ -291,10 +291,12 @@ Therefore:
   range. Net 4,319 → winner flips, 40 → non-winner flips; lift
   concentrates on high-yield REITs (BXMT, RPT), shipping/MLP-style
   payers (LPG, GNK, FLNG), and small-cap banks (LKFN, BCC) as
-  expected. One outlier — `DEC` with 604 flips — is worth a spot
-  check against Yahoo's `adjclose` series; concentrating 14% of all
-  flip-to-winner volume in a single ticker is suspicious but doesn't
-  move the aggregate. See PR #1, 2026-05-12 comment for full table.
+  expected. One outlier — `DEC` with 604 flips, 14% of all lift in
+  a single ticker — was spot-checked server-side against
+  `price_history.close_adj`: smooth dividend-accretion slope in
+  `close_adj / close`, no step-function discontinuity. Legitimate
+  very-high-yielder; +604 contribution stays. See PR #1, 2026-05-12
+  comments for full table.
 - **(Corrected.)** An earlier draft of this caveats list claimed
   "mixed adjustment basis" (close split+div-adjusted, raw OHLV). That
   was wrong — all stored columns are consistently split-adjusted. See
