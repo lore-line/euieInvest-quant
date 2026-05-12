@@ -333,7 +333,20 @@ breakdown and the DEC contamination correction. Therefore:
 
 ## 12. NOT building yet
 
-- No deep learning. No LSTM / Transformer. XGBoost is enough until it isn't.
+- **Deep learning track unlocked 2026-05-12** after Step 2 XGB shipped
+  edge (44.58% precision@top-decile vs 20.50% holdout base rate, AUC
+  0.731 — see [PR #1 issuecomment-4435741839](https://github.com/lore-line/euieInvest-quant/pull/1#issuecomment-4435741839)
+  for the full scope). DL runs as a **parallel research track**, not
+  a replacement: 1D-CNN → LSTM → small Transformer → XGB+DL hybrid →
+  ensemble, advanced per the comment's precision-gating criteria.
+  Each variant publishes under `pipeline_step` `step2b_dl_discovery_*`
+  alongside XGB at `lore-line/euieInvest-reports/runs/<date>/`.
+  **Production ranking model stays XGB** until a DL variant ships a
+  verified higher `holdout_precision_at_topdecile` on the same labels,
+  splits, and universe. If all DL variants under-perform XGB by >5pp,
+  the 5090 reverts to faster XGB iteration. Use mixed precision
+  (`torch.cuda.amp`); attest `runtime_device` in `manifest.json`
+  exactly like XGB does (CLAUDE.md §13's `runtime_device` field).
 - **No model-serving / inference server on heaven-pc.** No live trading
   hooks. No continuous training. (The source-data API on claudehost —
   see §3 and §4 — is allowed and in fact the operational data plane.
