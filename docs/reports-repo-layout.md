@@ -143,6 +143,38 @@ Columns: `feature_name` (Utf8), `timestep` (Int64),
 `0` = day t-1 (most recent), `59` = day t-60 (oldest, assuming a
 60-day window). Sorted by `(feature_name ASC, timestep ASC)`.
 
+### `rules.parquet` (required for Track 1 / 4 / 5 — rule-extraction tracks)
+
+Per-rule discovery output. Each row is one filtered conjunctive rule
+of the form ``feature_X op threshold AND feature_Y op threshold AND
+…`` that holds on the holdout at the precision/coverage/lift bar
+specified in the brief.
+
+| Column | Type | Notes |
+|---|---|---|
+| `rule_id` | Int64 | rank order, 0 = best by `lift × coverage` |
+| `conditions_json` | Utf8 | JSON list of `{feature, op ("<" / ">="), threshold}` objects, sorted canonically (feature, op, threshold) so two trees with identically-shaped paths dedupe to the same rule |
+| `n_conditions` | Int64 | conjunction length |
+| `coverage_n` | Int64 | rows in holdout that satisfy all conditions |
+| `coverage_pct` | Float64 | `100 × coverage_n / holdout_n_rows` |
+| `precision` | Float64 | `winners / coverage_n` (fraction in `[0, 1]`) |
+| `lift` | Float64 | `precision / holdout_base_rate` |
+| `example_symbol_dates_json` | Utf8 | up to 10 example matching `(symbol, date)` pairs for human spot-checking |
+
+Default filter (Track 1 brief): `lift ≥ 1.5 AND coverage_pct ≥ 0.5 AND
+precision ≥ 0.35`. Filter values are echoed in
+`manifest.filter_min_{lift, coverage_pct, precision}`.
+
+Track-1 manifest fields beyond the common set (none of the DL ones apply):
+
+| Field | Type | Notes |
+|---|---|---|
+| `source_model_run_id` | string | the predictor run whose model was walked (e.g. `"2026-05-12-001"`) |
+| `source_model_sha` | string | sha256 of the walked model file — pins exactly which booster the rules came from |
+| `n_paths_walked` | int | total root-to-leaf paths across all trees, pre-dedup |
+| `n_rules_unique` | int | after canonical-ordering dedup, pre-filter |
+| `n_rules_kept` | int | after filter, written to rules.parquet |
+
 ### `clusters.parquet` (required when Step 3 has run)
 
 Columns: `symbol` (Utf8), `date` (Date), `cluster_id` (Int64),
