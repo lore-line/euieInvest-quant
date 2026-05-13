@@ -64,6 +64,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip feature engineering and reuse the existing features parquet.",
     )
+    p.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Override the run output dir. Default: "
+        "runs/<today>-<pipeline_step>/. Use for retroactive overwrites "
+        "of an existing dated run (e.g. runs/2026-05-12/).",
+    )
+    p.add_argument(
+        "--top-per-day-k",
+        type=int,
+        default=20,
+        help="Per-day K for top-per-day.parquet (default 20).",
+    )
     return p.parse_args(argv)
 
 
@@ -265,17 +279,34 @@ def step2_supervised_discovery(args: argparse.Namespace) -> None:
         print(f"    {row['feature_name']:<35} {row['mean_abs_shap']:>10.5f}  {row['direction']}")
     print()
 
+    # Pipeline-step bucket (drives both manifest field + default run dir name).
+    edge_threshold = 0.25  # 25% > 18.94% base; matches the brief's edge bar.
+    pipeline_step = (
+        "step2_supervised_discovery"
+        if precision_at_topdecile >= edge_threshold
+        else "step2_no_edge_found"
+    )
+
     # ----- Artifacts -----
-    run_dir = _REPO_ROOT / "runs" / date.today().isoformat()
+    # Default to the canonical suffixed dir; --run-dir overrides for
+    # retroactive overwrites of historical dated runs (e.g. 2026-05-12).
+    if args.run_dir is not None:
+        run_dir = args.run_dir if args.run_dir.is_absolute() else (_REPO_ROOT / args.run_dir)
+        # When overriding the dir (retroactive overwrite), the run_id's date
+        # prefix should match the dir's date prefix — not today's UTC date.
+        run_date_str = run_dir.name[:10]
+    else:
+        run_date_str = date.today().isoformat()
+        run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
     run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  run dir: {run_dir.relative_to(_REPO_ROOT)}")
 
     # Save model alongside the manifest so its sha can be referenced.
     model_path = run_dir / "model.json"
     model._model.save_model(str(model_path))
     model_sha = hashlib.sha256(model_path.read_bytes()).hexdigest()
 
-    # top-decile.parquet: holdout rows in the top 10% by predicted proba,
-    # sorted (date asc, predicted_proba desc).
+    # top-decile.parquet: global top 10% — cross-architecture comparison surface.
     top_mask = np.zeros(n_holdout, dtype=bool)
     top_mask[top_idx] = True
     top_df = (
@@ -288,22 +319,36 @@ def step2_supervised_discovery(args: argparse.Namespace) -> None:
     top_df.write_parquet(topdecile_path)
     print(f"  wrote {topdecile_path.relative_to(_REPO_ROOT)}  ({top_df.height:,} rows)")
 
-    # shap-summary.parquet
+    # top-per-day.parquet: per-day top-K — dashboard surface.
+    per_day_k = max(1, int(args.top_per_day_k))
+    top_per_day = (
+        holdout.select(["symbol", "date"])
+        .with_columns(holdout_proba.cast(pl.Float64))
+        .with_columns(
+            pl.col("predicted_proba")
+            .rank(method="ordinal", descending=True)
+            .over("date")
+            .cast(pl.Int64)
+            .alias("rank_within_day")
+        )
+        .filter(pl.col("rank_within_day") <= per_day_k)
+        .sort(["date", "rank_within_day"])
+    )
+    top_per_day_path = run_dir / "top-per-day.parquet"
+    top_per_day.write_parquet(top_per_day_path)
+    print(
+        f"  wrote {top_per_day_path.relative_to(_REPO_ROOT)}  "
+        f"(K={per_day_k}/day, {top_per_day.height:,} rows)"
+    )
+
+    # shap-summary.parquet (column meaning: TreeSHAP for XGB; for DL the
+    # same column will carry IG attribution — see reports-repo-layout.md).
     shap_path = run_dir / "shap-summary.parquet"
     shap_df.write_parquet(shap_path)
     print(f"  wrote {shap_path.relative_to(_REPO_ROOT)}  ({shap_df.height} features)")
 
-    # manifest.json — CLAUDE.md §13 + the three new Step 2 fields the
-    # server side reads to surface edge claims.
-    edge_threshold = 0.25  # 25% > 18.94% base; matches the brief's edge bar.
-    pipeline_step = (
-        "step2_supervised_discovery"
-        if precision_at_topdecile >= edge_threshold
-        else "step2_no_edge_found"
-    )
-
     manifest = {
-        "run_id": f"{date.today().isoformat()}-001",
+        "run_id": f"{run_date_str}-001",
         "train_end": args.train_end.isoformat(),
         "val_end": args.val_end.isoformat(),
         "holdout_end": str(holdout["date"].max()),
@@ -316,6 +361,7 @@ def step2_supervised_discovery(args: argparse.Namespace) -> None:
         "holdout_base_rate": round(base_rate, 6),
         "holdout_n_rows": n_holdout,
         "holdout_top_decile_k": k,
+        "top_per_day_k": per_day_k,
         "universe_size": int(labeled["symbol"].n_unique()),
         "git_commit_of_quant_repo": _git_head_sha(),
         "pipeline_step": pipeline_step,
