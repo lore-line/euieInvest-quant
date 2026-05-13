@@ -1,8 +1,9 @@
 """Discovery pipeline entrypoint — 5-step orchestrator.
 
-Steps 1 and 2 (feature engineering, supervised discovery + SHAP) are
-implemented. Steps 3-5 (clustering, counterfactuals, tier-3 comparison)
-remain scaffolded — see CLAUDE.md §5 for the full methodology.
+Steps 1, 2 (XGB), and 2b (DL — CNN today, LSTM/Transformer/hybrid to
+follow) are implemented. Steps 3-5 (clustering, counterfactuals,
+tier-3 comparison) remain scaffolded — see CLAUDE.md §5 for the full
+methodology, CLAUDE.md §12 for the DL track unlock.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import argparse
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -18,6 +20,7 @@ import polars as pl
 
 from quant.backtest.temporal import split_by_date
 from quant.data.loader import load_ohlcv, load_peer_groups
+from quant.data.windows import WindowIndex, build_window_index
 from quant.features import (
     behavioral,
     gaps,
@@ -28,7 +31,7 @@ from quant.features import (
     volume,
 )
 from quant.labels import compute_forward_winner_labels
-from quant.models import XGBDiscovery
+from quant.models import CnnDiscovery, XGBDiscovery
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,6 +61,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="step2",
         help="Run pipeline up to and including this step (default: step2). "
         "Steps 3-5 are scaffolded; ask before bumping past step2.",
+    )
+    p.add_argument(
+        "--tracks",
+        default="xgb",
+        help="Comma-separated Step-2-class tracks to run: 'xgb' (Step 2), "
+        "'cnn' (Step 2b CNN). Default: 'xgb'. Pass 'cnn' to skip the XGB "
+        "rerun and produce only the CNN artifacts.",
     )
     p.add_argument(
         "--skip-step1",
@@ -382,6 +392,232 @@ def step2_supervised_discovery(args: argparse.Namespace) -> None:
     )
 
 
+def _filter_window_index_by_date(
+    idx: WindowIndex, lo: date | None, hi: date | None
+) -> WindowIndex:
+    """Subset a :class:`WindowIndex` to endpoints with ``lo < date <= hi``.
+
+    ``lo=None`` means no lower bound; ``hi=None`` means no upper bound.
+    The channels buffer is reused (same underlying memory) — only
+    endpoints/labels/dates get filtered.
+    """
+    # Both sides at day precision to dodge datetime64[ms] vs [D] coercion.
+    dates_d = idx.dates.astype("datetime64[D]")
+    mask = np.ones(idx.endpoints.shape[0], dtype=bool)
+    if lo is not None:
+        mask &= dates_d > np.datetime64(lo, "D")
+    if hi is not None:
+        mask &= dates_d <= np.datetime64(hi, "D")
+    return replace(
+        idx,
+        endpoints=idx.endpoints[mask],
+        labels=idx.labels[mask],
+        dates=idx.dates[mask],
+    )
+
+
+def step2b_cnn_discovery(args: argparse.Namespace) -> None:
+    """Train a 1D-CNN on 60×6 raw OHLCV windows; write Step 2b artifacts.
+
+    Same labels / splits / metric as the XGB Step 2 — see CLAUDE.md §12
+    (DL parallel research track) and PR #1 issuecomment-4435741839.
+    """
+    print("step 2b: 1D-CNN discovery ...")
+    labeled = pl.read_parquet(args.features_out).filter(
+        pl.col("is_winner").is_not_null()
+    )
+    print(
+        f"  loaded labeled: {labeled.height:,} rows, "
+        f"{labeled['symbol'].n_unique()} symbols, "
+        f"date range {labeled['date'].min()}→{labeled['date'].max()}"
+    )
+
+    # One global window index over all data; partition by date below.
+    # Channels buffer is shared — no duplication.
+    print("  building window index (60-day rolling, 6 channels) ...")
+    full_idx = build_window_index(labeled)
+    print(f"  total valid windows: {full_idx.n_windows:,}")
+
+    train_idx = _filter_window_index_by_date(full_idx, None, args.train_end)
+    val_idx = _filter_window_index_by_date(full_idx, args.train_end, args.val_end)
+    holdout_idx = _filter_window_index_by_date(full_idx, args.val_end, None)
+    assert train_idx.n_windows + val_idx.n_windows + holdout_idx.n_windows == full_idx.n_windows, (
+        "split lost or duplicated windows"
+    )
+    print(
+        f"  splits: train={train_idx.n_windows:,} | "
+        f"val={val_idx.n_windows:,} | "
+        f"holdout={holdout_idx.n_windows:,} "
+        f"({holdout_idx.dates.min()}→{holdout_idx.dates.max()})"
+    )
+
+    n_pos_train = int(train_idx.labels.sum())
+    n_neg_train = train_idx.n_windows - n_pos_train
+    spw = n_neg_train / max(n_pos_train, 1)
+    print(
+        f"  train balance: {n_pos_train:,} pos / {n_neg_train:,} neg "
+        f"({100.0 * n_pos_train / train_idx.n_windows:.2f}% positive) "
+        f"→ pos_weight={spw:.4f}"
+    )
+
+    model = CnnDiscovery(scale_pos_weight=spw)
+    print(f"  fitting Cnn1d on {model.device} ...")
+    model.fit(train_idx, val_idx)
+    print(
+        f"  fit complete: {model.epochs_trained} epochs, "
+        f"{model.train_wall_clock_s:.1f}s wall-clock, "
+        f"{model.param_count:,} params, "
+        f"runtime_device={model.runtime_device}"
+    )
+
+    # Holdout — touched ONCE.
+    print("  predicting on holdout ...")
+    holdout_proba = model.predict(holdout_idx)
+    y_np = holdout_idx.labels.astype(np.int8, copy=False)
+    from sklearn.metrics import roc_auc_score
+
+    auc = float(roc_auc_score(y_np, holdout_proba))
+
+    n_holdout = len(holdout_proba)
+    k = max(1, n_holdout // 10)
+    top_idx_ = np.argpartition(-holdout_proba, k - 1)[:k]
+    n_true_in_top = int(y_np[top_idx_].sum())
+    n_total_pos = int(y_np.sum())
+    precision_at_topdecile = n_true_in_top / k
+    recall_at_topdecile = n_true_in_top / n_total_pos if n_total_pos else 0.0
+    base_rate = n_total_pos / n_holdout
+    lift = precision_at_topdecile / base_rate if base_rate else float("nan")
+
+    print()
+    print(f"  HOLDOUT METRICS (n={n_holdout:,}, top decile k={k:,})")
+    print(f"    AUC                    = {auc:.4f}")
+    print(
+        f"    precision @ top-decile = {precision_at_topdecile:.4f}  "
+        f"(base rate {base_rate:.4f}, lift {lift:.2f}x)"
+    )
+    print(f"    recall    @ top-decile = {recall_at_topdecile:.4f}")
+    print()
+
+    # Attribution via Captum IG on a holdout sample.
+    print("  computing IntegratedGradients on holdout sample ...")
+    shap_df, timestep_df = model.attribution(holdout_idx, sample_size=10_000)
+    print("  per-channel mean-|IG|:")
+    for row in shap_df.iter_rows(named=True):
+        print(
+            f"    {row['feature_name']:<12} {row['mean_abs_shap']:>10.5f}  "
+            f"{row['direction']}"
+        )
+    print()
+
+    # ----- artifacts -----
+    pipeline_step = "step2b_dl_discovery_cnn"
+    if args.run_dir is not None:
+        run_dir = args.run_dir if args.run_dir.is_absolute() else (_REPO_ROOT / args.run_dir)
+        run_date_str = run_dir.name[:10]
+    else:
+        run_date_str = date.today().isoformat()
+        run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  run dir: {run_dir.relative_to(_REPO_ROOT)}")
+
+    # Save model state-dict for self-attestation / reproducibility.
+    import torch
+
+    model_path = run_dir / "model.pt"
+    torch.save(model._model.state_dict(), model_path)
+    model_sha = hashlib.sha256(model_path.read_bytes()).hexdigest()
+
+    # top-decile.parquet
+    holdout_symbols = np.array([holdout_idx.symbols[s] for s in holdout_idx.endpoints[:, 0]])
+    proba_series = pl.Series("predicted_proba", holdout_proba.astype(np.float64))
+    top_mask = np.zeros(n_holdout, dtype=bool)
+    top_mask[top_idx_] = True
+    holdout_df = pl.DataFrame(
+        {
+            "symbol": holdout_symbols,
+            "date": holdout_idx.dates.astype("datetime64[D]"),
+        }
+    ).with_columns(proba_series)
+    top_df = (
+        holdout_df.filter(pl.Series(values=top_mask))
+        .sort(["date", "predicted_proba"], descending=[False, True])
+    )
+    topdecile_path = run_dir / "top-decile.parquet"
+    top_df.write_parquet(topdecile_path)
+    print(f"  wrote {topdecile_path.relative_to(_REPO_ROOT)}  ({top_df.height:,} rows)")
+
+    # top-per-day.parquet
+    per_day_k = max(1, int(args.top_per_day_k))
+    top_per_day = (
+        holdout_df.with_columns(
+            pl.col("predicted_proba")
+            .rank(method="ordinal", descending=True)
+            .over("date")
+            .cast(pl.Int64)
+            .alias("rank_within_day")
+        )
+        .filter(pl.col("rank_within_day") <= per_day_k)
+        .sort(["date", "rank_within_day"])
+    )
+    top_per_day_path = run_dir / "top-per-day.parquet"
+    top_per_day.write_parquet(top_per_day_path)
+    print(
+        f"  wrote {top_per_day_path.relative_to(_REPO_ROOT)}  "
+        f"(K={per_day_k}/day, {top_per_day.height:,} rows)"
+    )
+
+    # shap-summary.parquet (per-channel mean |IG|)
+    shap_path = run_dir / "shap-summary.parquet"
+    shap_df.write_parquet(shap_path)
+    print(f"  wrote {shap_path.relative_to(_REPO_ROOT)}  ({shap_df.height} channels)")
+
+    # timestep-attribution.parquet (per-(channel, timestep) mean |IG|)
+    timestep_path = run_dir / "timestep-attribution.parquet"
+    timestep_df.write_parquet(timestep_path)
+    print(
+        f"  wrote {timestep_path.relative_to(_REPO_ROOT)}  "
+        f"({timestep_df.height} (channel, timestep) rows)"
+    )
+
+    manifest = {
+        "run_id": f"{run_date_str}-001",
+        "train_end": args.train_end.isoformat(),
+        "val_end": args.val_end.isoformat(),
+        "holdout_end": str(np.datetime_as_string(holdout_idx.dates.max(), unit="D")),
+        "model_sha": f"sha256:{model_sha}",
+        "feature_count": len(["open", "high", "low", "close", "close_adj", "volume"]),
+        "positive_rate_train": round(n_pos_train / train_idx.n_windows, 6),
+        "holdout_precision_at_topdecile": round(precision_at_topdecile, 6),
+        "holdout_recall_at_topdecile": round(recall_at_topdecile, 6),
+        "holdout_auc": round(auc, 6),
+        "holdout_base_rate": round(base_rate, 6),
+        "holdout_n_rows": n_holdout,
+        "holdout_top_decile_k": k,
+        "top_per_day_k": per_day_k,
+        "universe_size": len(holdout_idx.symbols),
+        "git_commit_of_quant_repo": _git_head_sha(),
+        "pipeline_step": pipeline_step,
+        "runtime_device": model.runtime_device,
+        "train_wall_clock_s": round(model.train_wall_clock_s or 0.0, 3),
+        # DL-specific fields per docs/reports-repo-layout.md.
+        "architecture": "cnn",
+        "param_count": model.param_count,
+        "epochs_trained": model.epochs_trained,
+        "mixed_precision": model.mixed_precision,
+        "window_length": 60,
+    }
+    manifest_path = run_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"  wrote {manifest_path.relative_to(_REPO_ROOT)}")
+    print()
+    print(
+        f"=== STEP 2b CNN RESULT: precision@top-decile = "
+        f"{precision_at_topdecile*100:.2f}% "
+        f"(base rate {base_rate*100:.2f}%, AUC {auc:.3f}, "
+        f"vs XGB Step 2 44.58%) ==="
+    )
+
+
 def step3_cluster_winners(args: argparse.Namespace) -> None:
     raise NotImplementedError(
         "scripts/discover.py:step3_cluster_winners — KMeans on winner-only "
@@ -422,7 +658,14 @@ def main(argv: list[str] | None = None) -> None:
         step1_build_features(args)
 
     if stop_idx >= _STEP_ORDER.index("step2"):
-        step2_supervised_discovery(args)
+        tracks = {t.strip().lower() for t in args.tracks.split(",") if t.strip()}
+        unknown = tracks - {"xgb", "cnn"}
+        if unknown:
+            raise SystemExit(f"--tracks: unknown values {sorted(unknown)}; expected xgb,cnn")
+        if "xgb" in tracks:
+            step2_supervised_discovery(args)
+        if "cnn" in tracks:
+            step2b_cnn_discovery(args)
     if stop_idx >= _STEP_ORDER.index("step3"):
         step3_cluster_winners(args)
     if stop_idx >= _STEP_ORDER.index("step4"):
