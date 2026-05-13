@@ -603,6 +603,7 @@ def step2b_cnn_discovery(args: argparse.Namespace) -> None:
         "architecture": "cnn",
         "param_count": model.param_count,
         "epochs_trained": model.epochs_trained,
+        "best_epoch": model.best_epoch,
         "mixed_precision": model.mixed_precision,
         "window_length": 60,
     }

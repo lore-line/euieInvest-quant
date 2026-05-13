@@ -115,6 +115,7 @@ class CnnDiscovery:
     _model: Cnn1d | None = field(default=None, init=False, repr=False)
     _train_wall_clock_s: float | None = field(default=None, init=False, repr=False)
     _epochs_trained: int = field(default=0, init=False, repr=False)
+    _best_epoch: int = field(default=0, init=False, repr=False)
     _best_val_precision: float = field(default=0.0, init=False, repr=False)
 
     @property
@@ -131,7 +132,16 @@ class CnnDiscovery:
 
     @property
     def epochs_trained(self) -> int:
+        """Total epochs the loop ran (including the one that triggered
+        early stop). Distinct from :attr:`best_epoch` (which is the epoch
+        the saved model state actually comes from)."""
         return self._epochs_trained
+
+    @property
+    def best_epoch(self) -> int:
+        """Epoch the saved (best) model state is from. Differs from
+        :attr:`epochs_trained` when early stopping fires."""
+        return self._best_epoch
 
     @property
     def param_count(self) -> int:
@@ -214,18 +224,24 @@ class CnnDiscovery:
             )
             if improved:
                 self._best_val_precision = val_prec
+                self._best_epoch = epoch
                 best_state = {k: v.detach().clone() for k, v in self._model.state_dict().items()}
                 epochs_since_improvement = 0
             else:
                 epochs_since_improvement += 1
-                if epochs_since_improvement >= self.patience:
-                    print(
-                        f"  early stop: val_prec@TD did not improve for "
-                        f"{self.patience} epochs (best {self._best_val_precision:.4f})"
-                    )
-                    break
 
+            # Bump the loop counter ONCE per iteration, before any break, so
+            # `epochs_trained` reflects "total iterations the loop ran"
+            # rather than "last-non-early-stopped epoch".
             self._epochs_trained = epoch
+
+            if epochs_since_improvement >= self.patience:
+                print(
+                    f"  early stop: val_prec@TD did not improve for "
+                    f"{self.patience} epochs (best {self._best_val_precision:.4f} "
+                    f"at epoch {self._best_epoch})"
+                )
+                break
 
         if best_state is not None:
             self._model.load_state_dict(best_state)

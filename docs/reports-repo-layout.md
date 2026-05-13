@@ -81,13 +81,14 @@ state. Fields:
 | `runtime_device` | string | device the fitted model actually ran on. XGB: from `booster.save_config()`. DL: from `next(model.parameters()).device`. `"cuda:0"` on heaven-pc; `"cpu"` would surface a silent CUDA fallback. |
 | `train_wall_clock_s` | float | wall-clock seconds inside the model's `fit()` / training loop, excluding data prep. A 5090 trains XGB step 2 in single-digit seconds and a 1D-CNN in low-minutes; CPU fallback would push this 1-2 orders of magnitude up. |
 
-DL-specific manifest fields (Step 2b only):
+DL-specific manifest fields (Step 2b and Phase A DL tracks):
 
 | Field | Type | Notes |
 |---|---|---|
-| `architecture` | string | `"cnn"` / `"lstm"` / `"transformer"` / `"hybrid"` / `"ensemble"` |
+| `architecture` | string | `"cnn"` / `"lstm"` / `"transformer"` / `"hybrid"` / `"ensemble"` / Phase-A-track-specific (e.g. `"foundation_transformer"`, `"protopnet"`, `"concept_bottleneck"`, `"vae"`) |
 | `param_count` | int | total trainable parameters |
-| `epochs_trained` | int | number of full epochs completed (post early-stopping) |
+| `epochs_trained` | int | total epochs the training loop ran (including any epoch that triggered early stop). Distinct from `best_epoch` for early-stopped runs. |
+| `best_epoch` | int | epoch the saved model state is from (the best val-metric epoch). Equal to `epochs_trained` when early stopping did not fire. |
 | `mixed_precision` | bool | whether `torch.cuda.amp` was used during training |
 
 ### `top-decile.parquet` (required, every run)
