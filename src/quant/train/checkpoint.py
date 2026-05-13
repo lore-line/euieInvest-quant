@@ -15,10 +15,15 @@ guardrail matters for long-epoch jobs (e.g. Track F's masked-bar
 pretraining, where one epoch over 2.4M windows may take 30+ min).
 
 Atomic writes via write-temp-then-rename — a reader (or a torn process)
-never sees a half-written checkpoint.
+never sees a half-written checkpoint. Retries on PermissionError because
+on Windows + Docker-volume-mount + cloud-sync (Nextcloud / OneDrive /
+Dropbox), the sync engine can hold a transient handle on the target,
+making `os.replace` fail intermittently. The retry-then-unlink-then-
+rename fallback survives that.
 """
 from __future__ import annotations
 
+import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -27,6 +32,41 @@ from typing import Any
 
 import numpy as np
 import torch
+
+
+_RENAME_RETRIES = 5
+_RENAME_RETRY_DELAY_S = 1.0
+
+
+def _atomic_replace(tmp: Path, target: Path) -> None:
+    """``tmp.replace(target)`` with PermissionError-tolerant retries.
+
+    Pure ``os.replace`` is atomic on POSIX and *almost* atomic on
+    Windows — but cloud-sync engines holding a transient file handle on
+    the target make it fail with WinError 5 / PermissionError. Retry a
+    few times with short sleeps; if that doesn't clear, unlink the
+    target and rename. The latter has a sub-millisecond window where
+    the target doesn't exist — a reader hitting that window sees no
+    file rather than a torn file, which is the failure mode we want.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_RENAME_RETRIES):
+        try:
+            tmp.replace(target)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(_RENAME_RETRY_DELAY_S * (attempt + 1))
+    # Last-resort fallback: unlink target then rename. Brief unprotected window.
+    try:
+        if target.exists():
+            target.unlink()
+        os.rename(tmp, target)
+        return
+    except OSError:
+        pass
+    assert last_exc is not None
+    raise last_exc
 
 
 __all__ = ["CheckpointManager"]
@@ -102,9 +142,7 @@ class CheckpointManager:
         target = self.dir / (filename or self.filename)
         tmp = target.with_suffix(target.suffix + ".tmp")
         torch.save(payload, tmp)
-        # Atomic on Windows and POSIX: same-directory rename replaces the
-        # target without a partial-file window.
-        tmp.replace(target)
+        _atomic_replace(tmp, target)
         self._last_save_ts = time.monotonic()
         self._last_save_epoch = epoch
         return target

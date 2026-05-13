@@ -118,10 +118,15 @@ class RunStatus:
         }
         if extras:
             doc.update(extras)
+        # Reuse the checkpoint module's PermissionError-tolerant rename
+        # so Nextcloud/OneDrive/Dropbox sync engines holding a transient
+        # handle on status.json don't kill long-running jobs.
+        from quant.train.checkpoint import _atomic_replace
+
         target = self.dir / self.filename
         tmp = target.with_suffix(target.suffix + ".tmp")
         tmp.write_text(json.dumps(doc, indent=2) + "\n")
-        tmp.replace(target)
+        _atomic_replace(tmp, target)
 
     def mark_epoch_complete(self) -> None:
         """Record an epoch's duration for ETA estimation. Call at epoch end."""

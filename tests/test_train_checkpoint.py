@@ -169,3 +169,56 @@ def test_run_status_atomic_no_partial_file(tmp_path: Path) -> None:
     status.update(state="training", epoch_current=1)
     assert (tmp_path / "status.json").exists()
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_atomic_replace_retries_on_permission_error(tmp_path: Path, monkeypatch) -> None:
+    """The PermissionError-tolerant replace must succeed when transient
+    PermissionErrors are interleaved with eventual success.
+
+    Cloud-sync engines (Nextcloud / OneDrive / Dropbox) on Windows hold
+    transient file handles on hot-modified files; the bare ``os.replace``
+    fails with PermissionError but a retry after a brief sleep
+    usually succeeds. This regression-tests that pattern.
+    """
+    from quant.train.checkpoint import _atomic_replace
+
+    tmp = tmp_path / "checkpoint.pt.tmp"
+    target = tmp_path / "checkpoint.pt"
+    tmp.write_bytes(b"new-content")
+    target.write_bytes(b"old-content")
+
+    real_replace = Path.replace
+    call_count = {"n": 0}
+
+    def flaky_replace(self, target_path):
+        call_count["n"] += 1
+        if call_count["n"] < 3:
+            raise PermissionError(13, "Permission denied")
+        return real_replace(self, target_path)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+    _atomic_replace(tmp, target)
+    assert target.read_bytes() == b"new-content"
+    assert not tmp.exists()
+    assert call_count["n"] >= 3, "expected at least one retry before success"
+
+
+def test_atomic_replace_falls_back_to_unlink_then_rename(tmp_path: Path, monkeypatch) -> None:
+    """If every retry of os.replace fails, the final fallback unlinks
+    the target then renames. Sub-millisecond window where target
+    doesn't exist; that's accepted over total failure.
+    """
+    from quant.train.checkpoint import _atomic_replace
+
+    tmp = tmp_path / "checkpoint.pt.tmp"
+    target = tmp_path / "checkpoint.pt"
+    tmp.write_bytes(b"new-content")
+    target.write_bytes(b"old-content")
+
+    def always_fail(self, target_path):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "replace", always_fail)
+    _atomic_replace(tmp, target)
+    assert target.read_bytes() == b"new-content"
+    assert not tmp.exists()
