@@ -42,6 +42,7 @@ __all__ = [
     "fetch_ohlcv",
     "fetch_peer_groups",
     "fetch_snapshot_cursor",
+    "fetch_symbols",
     "with_retry",
 ]
 
@@ -169,6 +170,19 @@ def fetch_peer_groups() -> dict[str, list[str]]:
     return _get("/peer-groups").json()
 
 
+def fetch_symbols() -> dict[str, dict[str, Any]]:
+    """``GET /api/v1/symbols`` → per-symbol static-ish metadata.
+
+    Returns a dict keyed by ticker; each value is a dict with
+    ``status`` / ``last_seen`` / ``shares_outstanding`` / ``sector`` /
+    ``listing_date``. Used by Track 11 (multi-task fine-tune) for the
+    sector-relative-rank label.
+
+    See `docs/api-contract.md` §5.6.
+    """
+    return _get("/symbols").json()
+
+
 def fetch_anomaly_flags(
     *,
     since: datetime | None = None,
@@ -265,6 +279,9 @@ class ApiClient:
 
     def peer_groups(self) -> dict[str, list[str]]:
         return fetch_peer_groups()
+
+    def symbols(self) -> dict[str, dict[str, Any]]:
+        return fetch_symbols()
 
     def anomaly_flags(self, **kwargs: Any) -> pl.DataFrame:
         return fetch_anomaly_flags(**kwargs)

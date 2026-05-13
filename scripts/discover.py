@@ -32,6 +32,7 @@ from quant.features import (
 )
 from quant.labels import compute_forward_winner_labels
 from quant.models import CnnDiscovery, XGBDiscovery
+from quant.tracks import make_run_id
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -358,7 +359,7 @@ def step2_supervised_discovery(args: argparse.Namespace) -> None:
     print(f"  wrote {shap_path.relative_to(_REPO_ROOT)}  ({shap_df.height} features)")
 
     manifest = {
-        "run_id": f"{run_date_str}-001",
+        "run_id": make_run_id(run_date_str, pipeline_step),
         "train_end": args.train_end.isoformat(),
         "val_end": args.val_end.isoformat(),
         "holdout_end": str(holdout["date"].max()),
@@ -580,7 +581,7 @@ def step2b_cnn_discovery(args: argparse.Namespace) -> None:
     )
 
     manifest = {
-        "run_id": f"{run_date_str}-001",
+        "run_id": make_run_id(run_date_str, pipeline_step),
         "train_end": args.train_end.isoformat(),
         "val_end": args.val_end.isoformat(),
         "holdout_end": str(np.datetime_as_string(holdout_idx.dates.max(), unit="D")),

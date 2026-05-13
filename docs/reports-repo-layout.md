@@ -61,7 +61,7 @@ state. Fields:
 
 | Field | Type | Notes |
 |---|---|---|
-| `run_id` | string | unique per run; convention `YYYY-MM-DD-NNN` |
+| `run_id` | string | unique per run; convention `YYYY-MM-DD-NNN-<step_short>` (e.g. `2026-05-13-001-step3a`). The `<step_short>` suffix was added 2026-05-13 to avoid cross-track collisions on the same day (PR #1 issuecomment-4436523651) — server-side ingest had to synthesize a composite PK before that. Pre-2026-05-13 runs use the older `YYYY-MM-DD-NNN` form; those are grandfathered. |
 | `train_end` | `YYYY-MM-DD` | inclusive |
 | `val_end` | `YYYY-MM-DD` | inclusive |
 | `holdout_end` | `YYYY-MM-DD` | inclusive |
@@ -174,6 +174,7 @@ Track-1 manifest fields beyond the common set (none of the DL ones apply):
 | `n_paths_walked` | int | total root-to-leaf paths across all trees, pre-dedup |
 | `n_rules_unique` | int | after canonical-ordering dedup, pre-filter |
 | `n_rules_kept` | int | after filter, written to rules.parquet |
+| `synthesis_top_n_by_lift_coverage` | int | the top-N rules the synthesis stage will foreground (full set still in `rules.parquet`). Default 200 per PR #1 issuecomment-4436499617 — server side surfaces this many in the catalog. |
 
 ### `clusters.parquet` (required for Track 2 / 7)
 

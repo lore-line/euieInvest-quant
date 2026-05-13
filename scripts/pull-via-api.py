@@ -113,6 +113,16 @@ def main(argv: list[str] | None = None) -> int:
         f"-> {pg_path.relative_to(_REPO_ROOT)}"
     )
 
+    symbols = api_client.with_retry(api_client.fetch_symbols, name="symbols")
+    syms_path = out / "symbols.json"
+    syms_path.write_text(json.dumps(symbols, indent=2, sort_keys=True))
+    n_with_sector = sum(1 for v in symbols.values() if v.get("sector"))
+    print(
+        f"  symbols: wrote {len(symbols)} symbols "
+        f"({n_with_sector} with sector) "
+        f"-> {syms_path.relative_to(_REPO_ROOT)}"
+    )
+
     flags = api_client.with_retry(
         api_client.fetch_anomaly_flags, name="anomaly-flags"
     )

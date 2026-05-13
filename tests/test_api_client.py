@@ -155,6 +155,34 @@ def test_fetch_peer_groups() -> None:
 
 
 @respx.mock
+def test_fetch_symbols() -> None:
+    payload = {
+        "AAPL": {
+            "status": "active",
+            "last_seen": "2026-05-12",
+            "shares_outstanding": 15204000000,
+            "sector": "Technology",
+            "listing_date": "1980-12-12",
+        },
+        "SPY": {
+            "status": "active",
+            "last_seen": "2026-05-12",
+            "shares_outstanding": None,
+            "sector": None,
+            "listing_date": "1993-01-29",
+        },
+    }
+    respx.get("http://test.invalid:8080/api/v1/symbols").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    symbols = api_client.fetch_symbols()
+    assert symbols == payload
+    # The Track 11 contract: per-symbol .get("sector") is what we need.
+    assert symbols["AAPL"]["sector"] == "Technology"
+    assert symbols["SPY"]["sector"] is None
+
+
+@respx.mock
 def test_fetch_anomaly_flags_serializes_status_filter() -> None:
     sent = pl.DataFrame(
         {

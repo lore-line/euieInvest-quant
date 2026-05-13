@@ -40,6 +40,7 @@ import xgboost as xgb
 
 from quant.backtest.temporal import split_by_date
 from quant.train import RunStatus, install_graceful_interrupt
+from quant.tracks import make_run_id
 from quant.tracks.xgb_rule_extraction import (
     Condition,
     Rule,
@@ -210,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    status = RunStatus(dir=run_dir, run_id=f"{run_date_str}-001", pipeline_step=pipeline_step, epoch_total=len(LABELS))
+    status = RunStatus(dir=run_dir, run_id=make_run_id(run_date_str, pipeline_step), pipeline_step=pipeline_step, epoch_total=len(LABELS))
     stop_flag = {"stop": False}
     install_graceful_interrupt(lambda: stop_flag.__setitem__("stop", True))
     status.update(state="training", epoch_current=0)
@@ -321,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
 
         wall_clock_s = round(time.perf_counter() - t0, 3)
         manifest = {
-            "run_id": f"{run_date_str}-001",
+            "run_id": make_run_id(run_date_str, pipeline_step),
             "pipeline_step": pipeline_step,
             "train_end": args.train_end.isoformat(),
             "val_end": args.val_end.isoformat(),

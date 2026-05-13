@@ -50,44 +50,83 @@ from quant.tracks.embedding_clustering import _find_latest_encoder, _load_encode
 from quant.tracks.multi_label_rules import LABELS as L_BINARY  # L1..L5
 from quant.tracks.xgb_rule_extraction import _replay_feature_selection
 from quant.train import CheckpointManager, RunStatus, install_graceful_interrupt
+from quant.tracks import make_run_id
 
 __all__ = ["MultiTaskHeads", "compute_sector_rank_label", "main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def compute_sector_rank_label(df: pl.DataFrame, peer_groups: dict[str, list[str]]) -> pl.DataFrame:
-    """Append `sector_rank` column ∈ [0, 1].
+def compute_sector_rank_label(
+    df: pl.DataFrame,
+    symbol_sector: dict[str, str | None],
+    top_decile_pct: float = 0.9,
+) -> pl.DataFrame:
+    """Append `sector_rank` binary label per PR #1 issuecomment-4436499617.
 
-    For each (symbol, date), the 30-day forward close_adj return is
-    ranked within the symbol's peer group on that date. NaN where the
-    symbol has no peer group.
+    Spec (server-team-corrected from the original peer_groups approach):
+
+      For each (symbol, date) where sector is not null:
+        fwd_30d_return[t]      = close_adj[t+30] / close_adj[t] - 1
+        rank_within_sector[t]  = rank(fwd_30d_return) within (sector, date)
+        sector_rank[t]         = (rank / cohort_size) >= 0.9
+
+    Binary, top-decile-within-sector. Null label for symbols with null
+    sector (the ~7 ETFs/index trackers). Uses /api/v1/symbols.sector
+    (~2,039/2,046 coverage) — NOT peer_groups.json (only 33 symbols).
     """
-    sym_to_group: dict[str, str] = {}
-    for grp, symbols in peer_groups.items():
-        for s in symbols:
-            sym_to_group[s] = grp
     df = df.with_columns(
-        pl.col("symbol").map_elements(lambda s: sym_to_group.get(s), return_dtype=pl.Utf8).alias("_peer_group")
+        pl.col("symbol").map_elements(
+            lambda s: symbol_sector.get(s), return_dtype=pl.Utf8
+        ).alias("_sector")
     )
     fwd = df.sort(["symbol", "date"]).with_columns(
-        _fmax=pl.col("close_adj")
-        .rolling_max(window_size=30, min_samples=30)
-        .shift(-30)
-        .over("symbol")
-    ).with_columns(
-        _fwd_return=(pl.col("_fmax") / pl.col("close_adj") - 1.0)
+        _fwd_return=(
+            pl.col("close_adj").shift(-30).over("symbol") / pl.col("close_adj") - 1.0
+        )
     )
-    # Rank within (date, peer_group). Polars rank within partition:
     ranked = fwd.with_columns(
-        _rank=pl.col("_fwd_return").rank(method="ordinal").over(["date", "_peer_group"]),
-        _group_size=pl.len().over(["date", "_peer_group"]),
+        _rank=pl.col("_fwd_return").rank(method="ordinal").over(["date", "_sector"]),
+        _cohort_size=pl.len().over(["date", "_sector"]),
     ).with_columns(
-        sector_rank=pl.when(pl.col("_peer_group").is_not_null())
-        .then((pl.col("_rank") - 1) / (pl.col("_group_size") - 1).clip(lower_bound=1))
+        _normalized_rank=pl.when(pl.col("_cohort_size") > 1)
+        .then((pl.col("_rank") - 1) / (pl.col("_cohort_size") - 1))
+        .otherwise(None)
+    ).with_columns(
+        sector_rank=pl.when(
+            pl.col("_sector").is_not_null()
+            & pl.col("_fwd_return").is_not_null()
+            & pl.col("_normalized_rank").is_not_null()
+        )
+        .then((pl.col("_normalized_rank") >= top_decile_pct).cast(pl.Float32))
         .otherwise(None)
     )
-    return ranked.drop("_fmax", "_fwd_return", "_rank", "_group_size", "_peer_group")
+    return ranked.drop("_fwd_return", "_rank", "_cohort_size", "_normalized_rank", "_sector")
+
+
+def _load_symbol_sectors(snapshot_dir: Path | None = None) -> dict[str, str | None]:
+    """Build {symbol: sector} from `/api/v1/symbols` (fetched live).
+
+    Falls back to ``snapshot_dir/symbols.json`` if the API isn't reachable
+    AND a cached snapshot exists. Either path satisfies the contract; the
+    live fetch is preferred so sector updates are picked up automatically.
+    """
+    try:
+        from quant.data.api_client import fetch_symbols
+        symbols = fetch_symbols()
+        return {sym: meta.get("sector") for sym, meta in symbols.items()}
+    except Exception as exc:
+        if snapshot_dir is not None:
+            cached = snapshot_dir / "symbols.json"
+            if cached.exists():
+                print(f"  /api/v1/symbols unreachable ({exc}); falling back to {cached}")
+                symbols = json.loads(cached.read_text())
+                return {sym: meta.get("sector") for sym, meta in symbols.items()}
+        raise RuntimeError(
+            "Could not load symbol→sector mapping. Either the API "
+            "(EUIEINVEST_API_BASE_URL) must be reachable, or a cached "
+            "data/snapshots/symbols.json must exist."
+        ) from exc
 
 
 class MultiTaskHeads(nn.Module):
@@ -117,7 +156,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Phase A Track 11 — multi-task fine-tune")
     p.add_argument("--encoder-path", type=Path, default=None)
     p.add_argument("--features", type=Path, default=Path("data/features/features.parquet"))
-    p.add_argument("--peer-groups", type=Path, default=Path("data/snapshots/peer_groups.json"))
+    p.add_argument(
+        "--symbols-snapshot", type=Path, default=Path("data/snapshots"),
+        help="Fallback dir for symbols.json if /api/v1/symbols isn't reachable.",
+    )
     p.add_argument("--out-dir", type=Path, default=None)
     p.add_argument("--train-end", type=date.fromisoformat, default=date(2023, 12, 31))
     p.add_argument("--val-end", type=date.fromisoformat, default=date(2024, 12, 31))
@@ -135,9 +177,6 @@ def _git_head_sha() -> str:
         return "unknown"
 
 
-def _load_peer_groups(p: Path) -> dict[str, list[str]]:
-    p = p if p.is_absolute() else (_REPO_ROOT / p)
-    return json.loads(p.read_text())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -152,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    status = RunStatus(dir=run_dir, run_id=f"{run_date_str}-001", pipeline_step=pipeline_step, epoch_total=args.epochs)
+    status = RunStatus(dir=run_dir, run_id=make_run_id(run_date_str, pipeline_step), pipeline_step=pipeline_step, epoch_total=args.epochs)
     stop_flag = {"stop": False}
     install_graceful_interrupt(lambda: stop_flag.__setitem__("stop", True))
     status.update(state="training", epoch_current=0)
@@ -179,8 +218,11 @@ def main(argv: list[str] | None = None) -> int:
         labeled_full = pl.read_parquet(
             args.features if args.features.is_absolute() else (_REPO_ROOT / args.features)
         )
-        peer_groups = _load_peer_groups(args.peer_groups)
-        labeled_full = compute_sector_rank_label(labeled_full, peer_groups)
+        snapshot_dir = args.symbols_snapshot if args.symbols_snapshot.is_absolute() else (_REPO_ROOT / args.symbols_snapshot)
+        symbol_sector = _load_symbol_sectors(snapshot_dir)
+        n_with_sector = sum(1 for v in symbol_sector.values() if v)
+        print(f"  loaded {len(symbol_sector)} symbols ({n_with_sector} with sector) from /api/v1/symbols")
+        labeled_full = compute_sector_rank_label(labeled_full, symbol_sector)
         labeled = labeled_full.filter(pl.col("is_winner").is_not_null())
         # Compute the 5 binary labels.
         l1 = L_BINARY["L1"]["fn"](labeled).rename({"label": "lbl_L1"})
@@ -358,7 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         pl.DataFrame(loss_history).write_parquet(run_dir / "losses.parquet")
         wall_clock_s = round(time.perf_counter() - t0, 3)
         manifest = {
-            "run_id": f"{run_date_str}-001",
+            "run_id": make_run_id(run_date_str, pipeline_step),
             "pipeline_step": pipeline_step,
             "encoder_path": str(encoder_path.relative_to(_REPO_ROOT)),
             "architecture": "encoder_unfrozen + 6_task_heads",

@@ -53,6 +53,7 @@ from quant.models.cnn_discovery import WindowDataset
 from quant.tracks.embedding_clustering import _find_latest_encoder, _load_encoder
 from quant.tracks.xgb_rule_extraction import _replay_feature_selection
 from quant.train import CheckpointManager, RunStatus, install_graceful_interrupt
+from quant.tracks import make_run_id
 
 __all__ = ["CONCEPTS", "ConceptBottleneck", "main"]
 
@@ -103,6 +104,11 @@ CONCEPTS: list[tuple[str, Any]] = [
     ("fresh_setup",        lambda: pl.col("days_since_last_20pct") > 60),
     ("recent_winner_echo", lambda: pl.col("days_since_last_20pct") < 30),
     ("hv_short_above_long", lambda: pl.col("hv_ratio_10_60") > 1.0),
+    # A/D-line negative distribution (PR #1 issuecomment-4436499617 ask) —
+    # Track 1's signature finding: rules involving `ad_line < <negative>`
+    # appeared in 5 of the top-10 rules. Captures the "smart-money
+    # distributed, panic washout, now bouncing" pattern.
+    ("ad_line_negative_distribution", lambda: pl.col("ad_line") < -1_000_000),
 ]
 N_CONCEPTS = len(CONCEPTS)
 
@@ -172,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    status = RunStatus(dir=run_dir, run_id=f"{run_date_str}-001", pipeline_step=pipeline_step, epoch_total=args.epochs)
+    status = RunStatus(dir=run_dir, run_id=make_run_id(run_date_str, pipeline_step), pipeline_step=pipeline_step, epoch_total=args.epochs)
     stop_flag = {"stop": False}
     install_graceful_interrupt(lambda: stop_flag.__setitem__("stop", True))
     status.update(state="training", epoch_current=0)
@@ -364,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         pl.DataFrame(loss_history).write_parquet(run_dir / "losses.parquet")
         wall_clock_s = round(time.perf_counter() - t0, 3)
         manifest = {
-            "run_id": f"{run_date_str}-001",
+            "run_id": make_run_id(run_date_str, pipeline_step),
             "pipeline_step": pipeline_step,
             "encoder_path": str(encoder_path.relative_to(_REPO_ROOT)),
             "n_concepts": N_CONCEPTS,

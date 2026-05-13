@@ -43,6 +43,7 @@ import numpy as np
 import polars as pl
 
 from quant.train import RunStatus, install_graceful_interrupt
+from quant.tracks import make_run_id
 from quant.tracks.xgb_rule_extraction import (
     Condition,
     Rule,
@@ -57,8 +58,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Date ranges per the brief. Each regime is a list of (lo, hi) inclusive ranges
 # so chop can span two disjoint windows.
+# Bull end-date corrected from 2024-12-31 → 2024-08-31 per server-team
+# regime boundary fix (PR #1 issuecomment-4436499617) — eliminates the
+# 4-month overlap with chop's second window (2024-09-01 → 2025-02-28).
 REGIMES: dict[str, list[tuple[date, date]]] = {
-    "bull":     [(date(2023, 10, 1), date(2024, 12, 31))],
+    "bull":     [(date(2023, 10, 1), date(2024, 8, 31))],
     "bear":     [(date(2022, 1, 1),  date(2022, 9, 30))],
     "chop":     [(date(2021, 5, 1),  date(2021, 12, 31)),
                  (date(2024, 9, 1),  date(2025, 2, 28))],
@@ -135,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    status = RunStatus(dir=run_dir, run_id=f"{run_date_str}-001", pipeline_step=pipeline_step, epoch_total=len(REGIMES))
+    status = RunStatus(dir=run_dir, run_id=make_run_id(run_date_str, pipeline_step), pipeline_step=pipeline_step, epoch_total=len(REGIMES))
     stop_flag = {"stop": False}
     install_graceful_interrupt(lambda: stop_flag.__setitem__("stop", True))
     status.update(state="training", epoch_current=0)
@@ -236,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
 
         wall_clock_s = round(time.perf_counter() - t0, 3)
         manifest = {
-            "run_id": f"{run_date_str}-001",
+            "run_id": make_run_id(run_date_str, pipeline_step),
             "pipeline_step": pipeline_step,
             "source_track1_rules": str(rules_path.relative_to(_REPO_ROOT)),
             "n_source_rules": len(rules),

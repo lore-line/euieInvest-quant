@@ -46,6 +46,7 @@ _HDBSCAN_AVAILABLE = True  # sklearn.cluster.HDBSCAN is built in to sklearn ≥ 
 
 from quant.train import RunStatus, install_graceful_interrupt
 from quant.tracks.xgb_rule_extraction import _replay_feature_selection
+from quant.tracks import make_run_id
 
 __all__ = ["main"]
 
@@ -252,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    status = RunStatus(dir=run_dir, run_id=f"{run_date_str}-001", pipeline_step=pipeline_step, epoch_total=1)
+    status = RunStatus(dir=run_dir, run_id=make_run_id(run_date_str, pipeline_step), pipeline_step=pipeline_step, epoch_total=1)
     stop_flag = {"stop": False}
     install_graceful_interrupt(lambda: stop_flag.__setitem__("stop", True))
     status.update(state="training", epoch_current=0)
@@ -333,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         # Manifest.
         wall_clock_s = round(time.perf_counter() - t0, 3)
         manifest = {
-            "run_id": f"{run_date_str}-001",
+            "run_id": make_run_id(run_date_str, pipeline_step),
             "pipeline_step": pipeline_step,
             "val_end": args.val_end.isoformat(),
             "holdout_start": "2025-01-02",

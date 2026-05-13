@@ -50,6 +50,7 @@ import polars as pl
 import xgboost as xgb
 
 from quant.train import RunStatus, install_graceful_interrupt
+from quant.tracks import make_run_id
 
 __all__ = ["Condition", "Rule", "extract_paths", "main"]
 
@@ -344,6 +345,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="If >0, keep only the top N rules by (lift × coverage). 0 = no cap.",
     )
     p.add_argument(
+        "--synthesis-top-n", type=int, default=200,
+        help="Top-N rules the synthesis stage foregrounds (full set still in "
+        "rules.parquet). Recorded in manifest.synthesis_top_n_by_lift_coverage. "
+        "Default 200 per PR #1 issuecomment-4436499617.",
+    )
+    p.add_argument(
         "--resume", default=None,
         help="No-op for this CPU track. Accepted for ops-shortcut compatibility.",
     )
@@ -365,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
 
     status = RunStatus(
         dir=run_dir,
-        run_id=f"{run_date_str}-001",
+        run_id=make_run_id(run_date_str, pipeline_step),
         pipeline_step=pipeline_step,
         epoch_total=1,  # rule extraction is a one-pass job
     )
@@ -493,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
         # Manifest.
         wall_clock_s = round(time.perf_counter() - t0, 3)
         manifest = {
-            "run_id": f"{run_date_str}-001",
+            "run_id": make_run_id(run_date_str, pipeline_step),
             "pipeline_step": pipeline_step,
             "source_model_run_id": source_manifest.get("run_id"),
             "source_model_sha": f"sha256:{model_sha}",
@@ -510,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
             "filter_min_lift": args.min_lift,
             "filter_min_coverage_pct": args.min_coverage_pct,
             "filter_min_precision": args.min_precision,
+            "synthesis_top_n_by_lift_coverage": int(args.synthesis_top_n),
             "runtime_device": "cpu",
             "train_wall_clock_s": wall_clock_s,
             "git_commit_of_quant_repo": _git_head_sha(),
