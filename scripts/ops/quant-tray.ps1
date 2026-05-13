@@ -166,14 +166,18 @@ $mExit.add_Click({
 
 $tray.ContextMenuStrip = $menu
 
-# Left-click on icon = quick status popup (toast-style balloon).
-$tray.add_Click({
+# Left-click opens the same menu as right-click. NotifyIcon's private
+# `ShowContextMenu` handles cursor positioning + taskbar-edge awareness
+# correctly; calling it via reflection beats `$menu.Show($cursor)` which
+# can render the menu off-screen near the taskbar.
+$showContextMenuMethod = [System.Windows.Forms.NotifyIcon].GetMethod(
+    'ShowContextMenu',
+    [System.Reflection.BindingFlags]'Instance,NonPublic'
+)
+$tray.add_MouseUp({
     param($s, $e)
     if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-        $summary = Get-StatusSummary
-        $tray.BalloonTipTitle = 'Quant pipeline'
-        $tray.BalloonTipText = $summary.tooltip
-        $tray.ShowBalloonTip(2500)
+        $showContextMenuMethod.Invoke($tray, $null)
     }
 }.GetNewClosure())
 
