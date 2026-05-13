@@ -126,17 +126,25 @@ if (-not (Test-Path $QuantRunsDir)) {
     New-Item -ItemType Directory -Path $QuantRunsDir -Force | Out-Null
 }
 
-# `--restart unless-stopped` survives:
-#   - host reboot (Docker Desktop auto-launches → container resumes)
-#   - container crash / OOM (restarts; entrypoint re-reads latest.pt)
-# Does NOT survive:
-#   - user-initiated stop (docker stop / docker kill marks the container as
-#     "manually stopped"; the policy then leaves it stopped). So
-#     quant-stop.ps1's SIGINT path still results in a real pause that
-#     persists across reboots, which is what we want.
+# `--restart on-failure:5` survives:
+#   - container crash / OOM (non-zero exit → restart up to 5 times;
+#     entrypoint re-reads latest.pt)
+#   - host reboot mid-training (the kernel SIGKILLs the container =
+#     non-zero exit → Docker daemon re-launches it on startup, entrypoint
+#     resumes from latest.pt)
+# Does NOT restart on:
+#   - clean training completion (exit 0 → no restart). This is the bug
+#     `unless-stopped` introduced: when training writes state=done and
+#     the python process exits 0, `unless-stopped` would auto-restart
+#     the container. The next launch would see state=done, deterministically
+#     rewrite the same encoder.pt/manifest/losses, exit 0, and loop forever.
+#     `on-failure` exits the loop on clean completion.
+#   - user-initiated stop (docker stop sends SIGTERM → SIGINT-graceful
+#     handler in the script causes exit 0 → no restart). So quant-stop.ps1
+#     produces a real pause that persists across reboots, same as before.
 $dockerArgs = @(
     'run', '-d',
-    '--restart', 'unless-stopped',
+    '--restart', 'on-failure:5',
     '--name', $ContainerName,
     '-v', "${RepoRoot}:/workspace",
     '-v', "${QuantRunsDir}:/workspace/runs",
