@@ -108,7 +108,96 @@ $tray.Visible = $true
 $tray.Icon = $Icons.grey
 $tray.Text = 'Quant: starting'
 
+# Track list — kept in sync with scripts/ops/quant-start.ps1's ValidateSet.
+$TrackList = @(
+    'step2_supervised_discovery',
+    'step2b_dl_discovery_cnn',
+    'step3a_xgb_rule_extraction',
+    'step3b_handcrafted_clustering',
+    'step3c_multi_label_rules',
+    'step3d_per_regime_rules',
+    'step3e_classical_counterfactual',
+    'step3f_foundation_pretrain',
+    'step3g_embedding_clustering',
+    'step3h_prototype_learning',
+    'step3i_concept_bottleneck',
+    'step3j_generative_winners',
+    'step3k_multitask_finetune',
+    'step3l_dl_counterfactual'
+)
+
+function Find-LastActiveRun {
+    <#
+    Returns the pipeline_step of the most recently active run — the most
+    recently modified status.json whose state is in
+    {training, paused, done, stale}. Used by the "Resume last" menu item.
+    Null if no runs exist.
+    #>
+    if (-not (Test-Path $RunsRoot)) { return $null }
+    $dirs = Get-ChildItem $RunsRoot -Directory -ErrorAction SilentlyContinue
+    if (-not $dirs) { return $null }
+    $candidates = @()
+    foreach ($d in $dirs) {
+        $sjson = Join-Path $d.FullName 'status.json'
+        if (-not (Test-Path $sjson)) { continue }
+        try {
+            $doc = Get-Content $sjson -Raw | ConvertFrom-Json
+            $candidates += [pscustomobject]@{
+                pipeline_step = $doc.pipeline_step
+                state         = $doc.state
+                mtime         = (Get-Item $sjson).LastWriteTime
+            }
+        } catch { continue }
+    }
+    if ($candidates.Count -eq 0) { return $null }
+    $best = $candidates | Sort-Object mtime -Descending | Select-Object -First 1
+    return $best.pipeline_step
+}
+
+function Start-TrackDetached {
+    param([string]$Track)
+    $startPs1 = Join-Path $OpsRoot 'quant-start.ps1'
+    Start-Process pwsh -ArgumentList @(
+        '-NoExit', '-ExecutionPolicy', 'Bypass',
+        '-File', "`"$startPs1`"", '-Track', $Track, '-Resume'
+    )
+}
+
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
+
+# "Resume last" — one-click pick-up-where-you-left-off.
+$mResume = $menu.Items.Add('Resume last')
+$mResume.add_Click({
+    $last = Find-LastActiveRun
+    if ($null -eq $last) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "No prior runs found under $RunsRoot. Use Start ▶ to pick a track.",
+            "Quant — Resume last",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        return
+    }
+    Start-TrackDetached -Track $last
+}.GetNewClosure())
+
+# "Start ▶" submenu — one item per track. Clicking starts the track
+# detached with `--resume latest` (no-op if no prior checkpoint).
+$mStart = New-Object System.Windows.Forms.ToolStripMenuItem('Start ▶')
+foreach ($t in $TrackList) {
+    $item = New-Object System.Windows.Forms.ToolStripMenuItem($t)
+    # PowerShell closure capture — $t needs to be bound at iteration time,
+    # not at click time. Wrapping in a sub-scope via .GetNewClosure() does that.
+    $trackCaptured = $t
+    $item.add_Click({
+        Start-TrackDetached -Track $trackCaptured
+    }.GetNewClosure())
+    $null = $mStart.DropDownItems.Add($item)
+}
+$null = $menu.Items.Add($mStart)
+
+# Separator
+$null = $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
 # "Status" — opens a PowerShell window running quant-status.ps1 in watch mode.
 $mStatus = $menu.Items.Add('Status…')
