@@ -175,12 +175,95 @@ Track-1 manifest fields beyond the common set (none of the DL ones apply):
 | `n_rules_unique` | int | after canonical-ordering dedup, pre-filter |
 | `n_rules_kept` | int | after filter, written to rules.parquet |
 
-### `clusters.parquet` (required when Step 3 has run)
+### `clusters.parquet` (required for Track 2 / 7)
 
-Columns: `symbol` (Utf8), `date` (Date), `cluster_id` (Int64),
-`distance_to_centroid` (Float64). Winner-only rows. `cluster_id`
-matches `manifest.cluster_labels` (added to manifest when
-`pipeline_step >= "step3"`).
+Per-cluster signature output. Each row is one cluster from one
+clustering configuration (algorithm × K).
+
+| Column | Type | Notes |
+|---|---|---|
+| `algorithm` | Utf8 | `"kmeans"` / `"gmm"` / `"hdbscan"` |
+| `k` | Int64 | `n_clusters` / `n_components` for KMeans/GMM; 0 for HDBSCAN (k auto-determined) |
+| `cluster_id` | Int64 | per-algorithm, per-k cluster ordinal |
+| `size` | Int64 | number of members in this cluster |
+| `signature_features_json` | Utf8 | top features by `|cluster_mean_z|` (the z-score of the cluster centroid in population z-space); JSON list of `{feature, cluster_mean_z, direction}` |
+| `example_symbol_dates_json` | Utf8 | up to 20 example `(symbol, date)` members |
+
+### `cluster-membership.parquet` (required for Track 2 / 7)
+
+Per-window cluster assignments. Used to cross-reference cluster
+membership with predictions from other tracks.
+
+| Column | Type | Notes |
+|---|---|---|
+| `symbol` | Utf8 | |
+| `date` | Date | |
+| `algorithm` | Utf8 | matches `clusters.parquet` |
+| `k` | Int64 | matches `clusters.parquet` |
+| `cluster_id` | Int64 | matches `clusters.parquet` |
+
+### `stable-features.parquet` (required for Track 4)
+
+Cross-label feature stability: which features appear in the top-K
+rules of multiple labels. Features in 3+ labels are *structurally
+stable* signals.
+
+| Column | Type | Notes |
+|---|---|---|
+| `feature_name` | Utf8 | |
+| `n_labels_top20` | Int64 | how many of the 5 labels' top-20 rules contain a condition on this feature |
+| `label_ids_present` | Utf8 | comma-separated label-id list (e.g. `"L1,L2,L4"`) |
+
+Track 4 also produces 5 per-label `rules_L{1..5}.parquet` files, each
+with the same schema as Track 1's `rules.parquet` plus a `label_id`
+column for join keys.
+
+### `regime-stability.parquet` (required for Track 5)
+
+Cross-regime lift comparison. Per (Track 1) rule, lift in each of
+the 4 regime slices + durability flag.
+
+| Column | Type | Notes |
+|---|---|---|
+| `source_rule_id` | Int64 | matches Track 1's `rules.parquet#rule_id` |
+| `lift_bull` | Float64 (nullable) | rule's lift on bull regime; null if it didn't pass filter there |
+| `lift_bear` | Float64 (nullable) | |
+| `lift_chop` | Float64 (nullable) | |
+| `lift_recovery` | Float64 (nullable) | |
+| `n_regimes_durable` | Int64 | count of regimes where `lift >= min_lift` |
+| `is_durable` | Boolean | `n_regimes_durable >= manifest.durable_min_regimes` |
+
+Track 5 also produces 4 per-regime `rules-{bull,bear,chop,recovery}.parquet`
+files (same schema as `rules.parquet` plus `source_rule_id`).
+
+### `winner-deltas.parquet` (required for Track 6)
+
+Per-feature mean delta from winner to its 5 nearest non-winners in
+the 47-dim feature space. Sorted by `|z_delta|` descending — the
+features that flip the outcome appear at the top.
+
+| Column | Type | Notes |
+|---|---|---|
+| `feature_name` | Utf8 | |
+| `rank` | Int64 | 0 = strongest discriminator |
+| `mean_delta_winner_minus_nearest_losers` | Float64 | raw-units mean delta |
+| `std_delta` | Float64 | spread across winners |
+| `z_delta` | Float64 | mean_delta / population_std — cross-feature comparable |
+| `direction` | Utf8 | `"+"` or `"-"` |
+
+### `nearest-non-winners.parquet` (required for Track 6)
+
+Per-winner: 5 nearest non-winner windows. For human spot-checking
+(why is this winner not a loser?).
+
+| Column | Type | Notes |
+|---|---|---|
+| `winner_symbol` | Utf8 | |
+| `winner_date` | Date | |
+| `neighbor_symbol` | Utf8 | |
+| `neighbor_date` | Date | |
+| `neighbor_rank` | Int64 | 1..k (k from `manifest.k_nearest`) |
+| `distance` | Float64 | in the chosen metric (`manifest.metric`) |
 
 ### `winner-fingerprint.md` (required when Step 4 has run)
 
