@@ -62,23 +62,59 @@ menu. Left-click for a balloon popup with the current summary.
 ## Resume
 
 Every Phase A training entrypoint accepts `--resume latest`. The
-`Quant — Start <track>` shortcuts pass `-Resume` to `quant-start.ps1`,
-which forwards `--resume latest` to the entrypoint. If no checkpoint
-exists, the entrypoint starts fresh — safe to always pass.
+tray's **Resume last** / **Start ▶ <track>** menu items pass
+`-Resume` to `quant-start.ps1`, which forwards `--resume latest`
+to the entrypoint. If no checkpoint exists, the entrypoint starts
+fresh — safe to always pass.
 
 So the typical pause/resume cycle is:
 
 1. Working on training → tray icon green
 2. You want to play a game → right-click tray → **Stop All (graceful)**
 3. Tray goes yellow (paused). Game.
-4. Done gaming → click the **Start <track>** shortcut(s) for whichever
-   tracks were paused. They resume from `latest.pt`.
+4. Done gaming → tray → **Resume last** (or **Start ▶ <track>**).
+   They resume from `latest.pt`.
 
 For a hard reclaim (game won't wait):
 
 1. Right-click tray → **Stop All (force) — reclaim GPU NOW**
 2. Lose ≤ 30 min of work (since-last-checkpoint).
-3. Start later as above. Resumes from `latest.pt` (the last 30-min checkpoint).
+3. Resume later as above. Resumes from `latest.pt`.
+
+## Auto-resume across reboots
+
+Every container started by `quant-start.ps1` runs with
+`--restart unless-stopped`. The semantics:
+
+- **Computer reboot or crash** → Docker Desktop auto-launches at
+  login (default Windows install) → Docker daemon restarts → the
+  container's `unless-stopped` policy fires → Python entrypoint
+  re-runs → sees `latest.pt` and auto-resumes from the last
+  checkpoint. No manual action needed.
+- **Container crash** (Python exception, OOM, etc.) → restart policy
+  re-runs the entrypoint → same auto-resume.
+- **User Stop All / Stop All (force)** → docker marks the container
+  as manually-stopped → policy is suppressed → the container stays
+  paused across reboots until you Resume.
+
+So: **kill the GPU process for any reason, including a hard reboot,
+and the training picks itself back up where it left off.** Nothing
+to remember.
+
+Caveat: this assumes Docker Desktop is set to auto-launch at login.
+That's the default on Windows install (registry key under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`). If you've
+disabled it, re-enable via Docker Desktop → Settings → General →
+"Start Docker Desktop when you log in".
+
+If you have a container that's already running but was started
+before this policy was introduced, update it in-place:
+
+```powershell
+docker update --restart unless-stopped <container-name>
+```
+
+No restart of the container required.
 
 ## Manual usage (no shortcuts)
 

@@ -126,8 +126,17 @@ if (-not (Test-Path $QuantRunsDir)) {
     New-Item -ItemType Directory -Path $QuantRunsDir -Force | Out-Null
 }
 
+# `--restart unless-stopped` survives:
+#   - host reboot (Docker Desktop auto-launches → container resumes)
+#   - container crash / OOM (restarts; entrypoint re-reads latest.pt)
+# Does NOT survive:
+#   - user-initiated stop (docker stop / docker kill marks the container as
+#     "manually stopped"; the policy then leaves it stopped). So
+#     quant-stop.ps1's SIGINT path still results in a real pause that
+#     persists across reboots, which is what we want.
 $dockerArgs = @(
     'run', '-d',
+    '--restart', 'unless-stopped',
     '--name', $ContainerName,
     '-v', "${RepoRoot}:/workspace",
     '-v', "${QuantRunsDir}:/workspace/runs",
