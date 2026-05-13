@@ -1,4 +1,4 @@
-# Winner-fingerprint theses — Phase A discovery synthesis (v1, in-flight)
+# Winner-fingerprint theses — Phase A discovery synthesis (v1.1, in-flight)
 
 > **Status: in-flight.** Six of twelve Phase A tracks have completed
 > (1, 2, 4, 5, 6 — classical, CPU). Track F (foundation Transformer
@@ -7,25 +7,42 @@
 > ship next session. This document is structured for completion as
 > those land; the in-flight version captures the corroborated
 > findings from the classical chunk.
+>
+> **v1.1 delta**: incorporates the server-team pairwise interaction
+> scan ([PR #19](https://github.com/lore-line/euieInvest-quant/pull/19) merged 2026-05-13)
+> as an additional corroboration track. Reframes Theses 3 and 5 as
+> archetypes-with-coverage-bands per the server-team recommendation
+> in PR #1 issuecomment-4436550035. Adds Thesis 7 (the new "healthy
+> pullback above 200-SMA" archetype at 48.7% precision). Track 5
+> updated with the corrected bull-regime end date (2024-08-31).
 
 ## Executive summary
 
-| | classical only (v1) | full (post Track F + 7-12) |
+| | classical only (v1.1) | full (post Track F + 7-12) |
 |---|---|---|
-| Candidate theses | 6 (this doc) | target 50-100 |
-| HIGH-confidence (3+ tracks) | 3 | TBD |
+| Candidate theses | 7 (this doc) | target 50-100 |
+| HIGH-confidence (3+ corroborating tracks) | 4 | TBD |
 | MED-confidence (2 tracks) | 3 | TBD |
 | LOW-confidence (1 track) | 0 | TBD |
-| Regime-durable (3+ of 4 regimes) | 423 of 1,100 rules | TBD |
+| Regime-durable (3+ of 4 regimes) | 431 of 1,100 rules | TBD |
 | Cross-method cluster overlap | TBD (Track 7 ⊓ Track 2) | TBD |
 
-**Headline finding so far**: peer-relative-SMA20 strength
-(`close_over_sma_20_peer_z`) is the single most differentiating
-feature between winners and their nearest non-winners — z_delta
-+0.909 in Track 6, an order of magnitude above the runner-up
-(+0.072). This is a candidate base-thesis: *winners are
-peer-outperforming on a short SMA basis at setup time, by a margin
-visible across the full feature space*.
+**Two headline findings**:
+
+1. **Peer-relative-SMA20 strength** (`close_over_sma_20_peer_z`) is the
+   single most differentiating feature between winners and their
+   nearest non-winners — z_delta +0.909 in Track 6, an order of
+   magnitude above the runner-up (+0.072). *Winners are peer-
+   outperforming on a short SMA basis at setup time, by a margin
+   visible across the full feature space.*
+
+2. **"Healthy pullback above 200-SMA"** — the 2-condition pair
+   `pct_of_252d_high < q25 AND close_over_sma_200 ≥ q75` hits
+   **48.7% precision, lift 2.38** on the holdout (1.0% coverage)
+   per the server-team pairwise interaction scan. Highest 2-condition
+   precision across any Phase A method to date. Sharper specificity
+   than Track 1's 5-condition top rules, narrower coverage; both bands
+   are valid thesis material.
 
 ## Phase 2 go/no-go gate status
 
@@ -163,6 +180,47 @@ contain this combination).
 (squeeze → expansion). Could codify as a Tier 3 rule combining a
 `bb_squeeze_20` lower bound with a `range_expansion_5d` lower bound.
 
+### Thesis 7 — Healthy pullback above the 200-SMA (sharp specificity band)
+
+**Pattern**: `pct_of_252d_high < ~q25` (off year high) **AND**
+`close_over_sma_200 ≥ ~q75` (still well above the long-term mean).
+The "stage-1 base, with the long-term uptrend intact" archetype.
+
+**Evidence**:
+
+| track | metric | value |
+|---|---|---|
+| pairwise scan (PR #19) | top synergistic 2-condition pair | **48.7% precision, lift 2.38, 1.0% coverage** |
+| 1 (XGB SHAP) | both features in top 6 by mean \|SHAP\| | (−) and (+) respectively |
+| 4 (multi-label) | both features in stable cohort | 4/5 and 2/5 labels |
+| 5 (per-regime) | rules with these conditions durable | 3 of 4 regimes |
+
+**Confidence**: HIGH (4 corroborating tracks). The pairwise scan adds
+a fourth independent method to the trio that surfaced Thesis 3 —
+sharpened from "off year high, above year low" (broad) to "off year
+high AND above 200-SMA" (specific). Same direction of evidence;
+narrower window of applicability; much higher precision.
+
+**Regime stability**: the `close_over_sma_200` qualifier likely
+makes this bull-and-recovery-conditioned (the 200-SMA being far
+below close requires an underlying long-term uptrend). Track 5's
+regime-stability.parquet will pin down which exact regimes carry
+this pair.
+
+**Codification suggestion**: **strong candidate Tier 3 doctrine
+rule**. The brief estimated synthesis would surface ~50-100 candidate
+theses; this one is among the sharpest single rules in the catalog.
+Two-line filter, ~1% of universe matches per day, 48.7% precision —
+the precision/coverage tradeoff is favorable for a *small-cohort
+high-conviction* trading rule rather than a *broad scanning gate*.
+
+**Related to Thesis 3 (broad band)**: the same axis (position-in-
+range × trend-from-MA200) — Thesis 3 is the wide cohort definition,
+Thesis 7 is the tight cohort definition. For the catalog, present
+them as **two coverage bands of the same archetype**: broad-stage-1
+(Thesis 3) for prescreen filtering, tight-stage-1-with-long-uptrend
+(Thesis 7) for high-conviction selection.
+
 ### Thesis 6 — Recent winner-echo recency signal
 
 **Pattern**: `days_since_last_20pct ∈ [0, ~30 days]` — symbol had a
@@ -248,6 +306,18 @@ questions, some are self-imposed before the synthesis is final:
    is the strongest univariate signal (Cohen's d 0.44-0.73). This
    corroborates Thesis 2 with a method not in the 12-track menu.
 
+7. **Pairwise interaction cross-check** — PR #19 ([server/analysis/pairwise_interaction_scan.py](../server/analysis/pairwise_interaction_scan.py))
+   scans all 91 pairs of 14 features × 16 quartile cells. Two
+   findings feed this catalog directly:
+   - **Vol redundancy**: pairing any two of `atr_pct_14`/`rvol_20`/
+     `hl_pct` adds essentially no lift over a single vol measure
+     (~0.2pp). Implication: in any rule, **one vol feature is
+     sufficient**; including two is wasted capacity. Worth flagging
+     in the synthesis if any rule uses multiple vol measures.
+   - **The "healthy pullback above 200-SMA" archetype** — Thesis 7
+     above. New pattern surfaced by the pairwise scan that doesn't
+     stand out in single-feature SHAP / bivariate / rule lift.
+
 ## Cross-track corroboration matrix (classical only, v1)
 
 For each top hand-crafted feature: which classical tracks surface it
@@ -290,7 +360,7 @@ as load-bearing?
 
 ### Track 5 — Per-regime stability
 - Method: re-evaluate Track 1's 1,100 rules on bull / bear / chop / recovery slices
-- Result: 423 of 1,100 rules durable in 3+ regimes
+- Result: 431 of 1,100 rules durable in 3+ regimes
 - Bear-tape slice (2022-01-01 → 2022-09-30) kept 384 rules vs bull's 830
 
 ### Track 6 — Classical counterfactuals
