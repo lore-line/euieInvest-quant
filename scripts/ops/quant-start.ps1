@@ -115,10 +115,22 @@ if ($Resume) {
 $GpuArgs = @('--runtime', 'nvidia', '-e', 'NVIDIA_VISIBLE_DEVICES=all',
              '-e', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility')
 
+# Runs/ override: keep training artifacts OUT of any cloud-sync folder.
+# Cloud-sync engines (Nextcloud / OneDrive / Dropbox / iCloud) hold
+# transient file handles on hot-modified files and cause atomic-rename
+# PermissionErrors mid-training. Override via QUANT_RUNS_DIR; default to
+# D:\quant-runs on Windows.
+$QuantRunsDir = if ($env:QUANT_RUNS_DIR) { $env:QUANT_RUNS_DIR } else { 'D:\quant-runs' }
+if (-not (Test-Path $QuantRunsDir)) {
+    Write-Host "Creating runs dir at $QuantRunsDir ..." -ForegroundColor Cyan
+    New-Item -ItemType Directory -Path $QuantRunsDir -Force | Out-Null
+}
+
 $dockerArgs = @(
     'run', '-d',
     '--name', $ContainerName,
     '-v', "${RepoRoot}:/workspace",
+    '-v', "${QuantRunsDir}:/workspace/runs",
     '-w', '/workspace'
 ) + $GpuArgs + @('euieinvest-quant:latest') + $cmd
 

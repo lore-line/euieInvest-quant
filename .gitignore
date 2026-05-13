@@ -12,7 +12,8 @@ data/snapshots/peer_groups.json
 data/features/*.parquet
 reports/*.png
 reports/*.html
-runs/
+runs/*
+!runs/README.md
 .env
 .DS_Store
 *.egg-info/

@@ -7,6 +7,12 @@ x-app: &app
     - NVIDIA_DRIVER_CAPABILITIES=compute,utility
   volumes:
     - .:/workspace
+    # Runs/ lives OUTSIDE Nextcloud — cloud-sync engines hold transient
+    # file handles on hot-modified files (latest.pt, status.json) and
+    # cause atomic-rename PermissionErrors mid-training. The repo's
+    # `runs/` dir is empty/junk; this override mounts the real one.
+    # Override the host path with the QUANT_RUNS_DIR env var.
+    - ${QUANT_RUNS_DIR:-D:/quant-runs}:/workspace/runs
   working_dir: /workspace
 
 services:

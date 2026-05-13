@@ -34,7 +34,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$RunsRoot = Join-Path $RepoRoot 'runs'
+# Runs/ lives outside any cloud-sync folder — see quant-start.ps1 for context.
+# Override via QUANT_RUNS_DIR env var; default to D:\quant-runs.
+$RunsRoot = if ($env:QUANT_RUNS_DIR) { $env:QUANT_RUNS_DIR } else { 'D:\quant-runs' }
 
 function Format-Age([datetime]$then) {
     $delta = (Get-Date) - $then
