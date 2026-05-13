@@ -44,7 +44,14 @@ __all__ = ["RunStatus", "install_graceful_interrupt"]
 
 
 def _utc_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """ISO 8601 UTC timestamp with millisecond precision (`...Z` suffix).
+
+    Millisecond resolution distinguishes two near-simultaneous
+    checkpoint writes — useful when reconstructing crash timelines from
+    status.json + log timestamps.
+    """
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 @dataclass
@@ -61,11 +68,26 @@ class RunStatus:
     _start_monotonic: float = field(default_factory=time.monotonic, init=False, repr=False)
     _epoch_durations: list[float] = field(default_factory=list, init=False, repr=False)
     _last_epoch_start: float = field(default=0.0, init=False, repr=False)
+    _last_checkpoint_epoch: int | None = field(default=None, init=False, repr=False)
+    _last_checkpoint_at: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.dir = Path(self.dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self._last_epoch_start = time.monotonic()
+
+    # ----- checkpoint tracking -----
+
+    def record_checkpoint(self, epoch: int) -> None:
+        """Record that a new checkpoint was just saved at ``epoch``.
+
+        Persists across subsequent ``update()`` calls — the status.json
+        keeps showing the latest checkpoint info even on non-checkpoint
+        progress ticks, until a newer ``record_checkpoint`` overwrites
+        it.
+        """
+        self._last_checkpoint_epoch = epoch
+        self._last_checkpoint_at = _utc_iso()
 
     # ----- write -----
 
@@ -74,11 +96,11 @@ class RunStatus:
         *,
         state: str,
         epoch_current: int = 0,
-        last_checkpoint_epoch: int | None = None,
         error: str | None = None,
         extras: dict[str, Any] | None = None,
     ) -> None:
-        """Atomic write of the current status."""
+        """Atomic write of the current status. The most recent checkpoint
+        (set via :meth:`record_checkpoint`) is preserved across calls."""
         eta = self._eta_estimate(epoch_current)
         doc: dict[str, Any] = {
             "run_id": self.run_id,
@@ -87,8 +109,8 @@ class RunStatus:
             "epoch_current": epoch_current,
             "epoch_total": self.epoch_total,
             "started_at": self._started_at,
-            "last_checkpoint_at": _utc_iso() if last_checkpoint_epoch is not None else None,
-            "last_checkpoint_epoch": last_checkpoint_epoch,
+            "last_checkpoint_at": self._last_checkpoint_at,
+            "last_checkpoint_epoch": self._last_checkpoint_epoch,
             "eta_estimate_s": eta,
             "pid": os.getpid(),
             "host": platform.node(),

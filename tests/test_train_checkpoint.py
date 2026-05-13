@@ -107,7 +107,8 @@ def test_run_status_writes_valid_json(tmp_path: Path) -> None:
         pipeline_step="step3f_foundation_pretrain",
         epoch_total=50,
     )
-    status.update(state="training", epoch_current=3, last_checkpoint_epoch=2)
+    status.record_checkpoint(epoch=2)
+    status.update(state="training", epoch_current=3)
     doc = RunStatus.read(tmp_path / "status.json")
     assert doc["run_id"] == "2026-05-13-001"
     assert doc["pipeline_step"] == "step3f_foundation_pretrain"
@@ -118,6 +119,31 @@ def test_run_status_writes_valid_json(tmp_path: Path) -> None:
     assert doc["last_checkpoint_at"] is not None
     assert doc["pid"] > 0
     assert doc["error"] is None
+
+
+def test_run_status_checkpoint_persists_across_updates(tmp_path: Path) -> None:
+    """Once record_checkpoint() fires, subsequent updates keep the value
+    until a newer record_checkpoint() overwrites it."""
+    status = RunStatus(dir=tmp_path, run_id="r", pipeline_step="x", epoch_total=10)
+    status.record_checkpoint(epoch=4)
+    status.update(state="training", epoch_current=5)
+    doc1 = RunStatus.read(tmp_path / "status.json")
+    assert doc1["last_checkpoint_epoch"] == 4
+
+    # Non-checkpoint update: still says epoch 4.
+    status.update(state="training", epoch_current=6)
+    doc2 = RunStatus.read(tmp_path / "status.json")
+    assert doc2["last_checkpoint_epoch"] == 4
+    assert doc2["last_checkpoint_at"] == doc1["last_checkpoint_at"]
+
+    # New checkpoint: bumps both. Timestamp ordering is monotonic (>= prev),
+    # but we don't assert strict inequality — two adjacent record_checkpoint
+    # calls can land in the same millisecond on a fast machine.
+    status.record_checkpoint(epoch=8)
+    status.update(state="training", epoch_current=9)
+    doc3 = RunStatus.read(tmp_path / "status.json")
+    assert doc3["last_checkpoint_epoch"] == 8
+    assert doc3["last_checkpoint_at"] >= doc1["last_checkpoint_at"]
 
 
 def test_run_status_eta_uses_recent_epoch_durations(tmp_path: Path) -> None:
