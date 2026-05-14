@@ -77,7 +77,13 @@ DIM_FF = 3072
 PROJ_DIM = 64  # contrastive projection dimension
 MASK_RATIO = 0.15
 NTX_TEMPERATURE = 0.1
-NEIGHBOR_WINDOW_DAYS = 5  # within-symbol positive-pair radius
+NEIGHBOR_WINDOW_DAYS = 5  # within-symbol positive-pair radius (v1 default)
+# Track F-v2 temporal-augmentation defaults (per PR #1 issuecomment-4446870):
+#   widened neighbor window (5 → 20-30d) + stochastic channel mask + time jitter
+# These are zero/disabled by default for v1 reproducibility. CLI flags override
+# in the v2 launch script.
+POSITIVE_CHANNEL_MASK_PCT = 0.0
+POSITIVE_TIME_JITTER_DAYS = 0
 
 
 # ----- model -----
@@ -196,11 +202,24 @@ class MaskedContrastiveDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.T
     anchor and positive (no masking).
     """
 
-    def __init__(self, index: WindowIndex, mask_ratio: float = MASK_RATIO, eps: float = 1e-6, seed: int = 42) -> None:
+    def __init__(
+        self,
+        index: WindowIndex,
+        mask_ratio: float = MASK_RATIO,
+        eps: float = 1e-6,
+        seed: int = 42,
+        neighbor_window_days: int = NEIGHBOR_WINDOW_DAYS,
+        positive_channel_mask_pct: float = POSITIVE_CHANNEL_MASK_PCT,
+        positive_time_jitter_days: int = POSITIVE_TIME_JITTER_DAYS,
+    ) -> None:
         self.index = index
         self.mask_ratio = mask_ratio
         self.eps = eps
         self._rng = np.random.default_rng(seed)
+        # Track F-v2 augmentation params — defaults reproduce v1 exactly.
+        self.neighbor_window_days = neighbor_window_days
+        self.positive_channel_mask_pct = positive_channel_mask_pct
+        self.positive_time_jitter_days = positive_time_jitter_days
         # Pre-compute per-symbol endpoint lists for fast positive-pair sampling.
         self._endpoints_by_sym: dict[int, np.ndarray] = {}
         for sym_id in range(len(index.symbols)):
@@ -220,12 +239,12 @@ class MaskedContrastiveDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.T
         return (x - mean) / std
 
     def _sample_positive(self, anchor_pos: int, sym_id: int) -> int:
-        """Pick another endpoint in the same symbol within ±NEIGHBOR_WINDOW_DAYS."""
+        """Pick another endpoint in the same symbol within ±neighbor_window_days."""
         cohort = self._endpoints_by_sym[sym_id]
         anchor_local = self.index.endpoints[anchor_pos, 1]
-        # local_end values are within NEIGHBOR_WINDOW_DAYS of anchor_local.
+        # local_end values are within neighbor_window_days of anchor_local.
         diffs = np.abs(self.index.endpoints[cohort, 1] - anchor_local)
-        candidates = cohort[(diffs > 0) & (diffs <= NEIGHBOR_WINDOW_DAYS)]
+        candidates = cohort[(diffs > 0) & (diffs <= self.neighbor_window_days)]
         if len(candidates) == 0:
             # Fall back to self (degenerate but rare — symbol has very few windows).
             return anchor_pos
@@ -234,16 +253,38 @@ class MaskedContrastiveDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.T
         return int(_random.choice(candidates.tolist()))
 
     def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        import random as _random
+
         sym_id, anchor_local = self.index.endpoints[i]
         anchor = self._window_zscored(sym_id, anchor_local)
         pos_pos = self._sample_positive(i, sym_id)
         pos_sym, pos_local = self.index.endpoints[pos_pos]
+
+        # Track F-v2: optional ±jitter on the positive's local_end. Constrained
+        # to stay within the symbol's valid window range (we have a per-symbol
+        # start that maps local_end → global window slice).
+        if self.positive_time_jitter_days > 0:
+            jitter = _random.randint(-self.positive_time_jitter_days, self.positive_time_jitter_days)
+            sym_n_windows = int((self.index.endpoints[:, 0] == pos_sym).sum())
+            # local_end ∈ [0, sym_n_windows-1]; clamp so we don't run off the end.
+            pos_local_jittered = int(max(0, min(sym_n_windows - 1, pos_local + jitter)))
+            pos_local = pos_local_jittered
+
         positive = self._window_zscored(pos_sym, pos_local)
+
+        # Track F-v2: optional stochastic channel masking on the positive.
+        # Each (channel, timestep) cell is independently zeroed with probability
+        # positive_channel_mask_pct. Forces the contrastive head to learn invariance
+        # to small per-cell noise rather than memorize exact pixel values.
+        if self.positive_channel_mask_pct > 0.0:
+            drop_mask = self._rng.random(positive.shape) < self.positive_channel_mask_pct
+            positive = positive.copy()
+            positive[drop_mask] = 0.0
+
         # Generate mask via DataLoader-worker-local RNG. Numpy default_rng
         # per-worker isn't seeded deterministically; use python random
         # which DataLoader seeds per-worker for us via worker_init_fn (omitted
         # — non-determinism here is acceptable, masking is random anyway).
-        import random as _random
         mask = np.zeros(WINDOW, dtype=bool)
         n_mask = max(1, int(WINDOW * self.mask_ratio))
         mask_indices = _random.sample(range(WINDOW), n_mask)
@@ -278,6 +319,10 @@ class FoundationTrainer:
     device: str
     mixed_precision: bool
     random_seed: int
+    # Track F-v2 temporal-augmentation params (defaults reproduce v1 exactly).
+    neighbor_window_days: int = NEIGHBOR_WINDOW_DAYS
+    positive_channel_mask_pct: float = POSITIVE_CHANNEL_MASK_PCT
+    positive_time_jitter_days: int = POSITIVE_TIME_JITTER_DAYS
     status_update_every_n_batches: int = 50
 
     _model: FoundationTransformer | None = field(default=None, init=False, repr=False)
@@ -296,8 +341,18 @@ class FoundationTrainer:
         print(f"  model: {n_params/1e6:.2f}M params on {device}")
 
         opt = torch.optim.AdamW(model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        train_ds = MaskedContrastiveDataset(train_idx, seed=self.random_seed)
-        val_ds = MaskedContrastiveDataset(val_idx, seed=self.random_seed + 1)
+        train_ds = MaskedContrastiveDataset(
+            train_idx, seed=self.random_seed,
+            neighbor_window_days=self.neighbor_window_days,
+            positive_channel_mask_pct=self.positive_channel_mask_pct,
+            positive_time_jitter_days=self.positive_time_jitter_days,
+        )
+        val_ds = MaskedContrastiveDataset(
+            val_idx, seed=self.random_seed + 1,
+            neighbor_window_days=self.neighbor_window_days,
+            positive_channel_mask_pct=self.positive_channel_mask_pct,
+            positive_time_jitter_days=self.positive_time_jitter_days,
+        )
         train_loader = DataLoader(
             train_ds, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=(device.type == "cuda"),
@@ -470,6 +525,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help='Pass "latest" to auto-resume from runs/<date>-<step>/latest.pt; '
         'pass an explicit path otherwise. No-op if no checkpoint exists.',
     )
+    # Track F-v2 temporal-augmentation flags. v1 reproducibility = all defaults.
+    p.add_argument(
+        "--neighbor-window-days", type=int, default=NEIGHBOR_WINDOW_DAYS,
+        help=f"Positive-pair sampling window (±N days). v1 default = {NEIGHBOR_WINDOW_DAYS}. "
+             "Track F-v2 recommends 20-30 to break the same-symbol over-memorization.",
+    )
+    p.add_argument(
+        "--positive-channel-mask-pct", type=float, default=POSITIVE_CHANNEL_MASK_PCT,
+        help="Fraction of (channel, timestep) cells to zero in the positive window. "
+             f"v1 default = {POSITIVE_CHANNEL_MASK_PCT}. Track F-v2 recommends 0.10.",
+    )
+    p.add_argument(
+        "--positive-time-jitter-days", type=int, default=POSITIVE_TIME_JITTER_DAYS,
+        help=f"±jitter on positive window's local_end. v1 default = {POSITIVE_TIME_JITTER_DAYS}. "
+             "Track F-v2 recommends 3.",
+    )
+    p.add_argument(
+        "--variant-suffix", type=str, default="",
+        help='Suffix appended to pipeline_step + run_dir name. Use e.g. "_v2_temporal" '
+             "for Track F-v2 to keep its run dir distinct from v1.",
+    )
     return p.parse_args(argv)
 
 
@@ -494,7 +570,7 @@ def _save_safetensors_fp16(model: FoundationTransformer, path: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     t0 = time.perf_counter()
-    pipeline_step = "step3f_foundation_pretrain"
+    pipeline_step = f"step3f_foundation_pretrain{args.variant_suffix}"
     run_date_str = date.today().isoformat()
     if args.out_dir is not None:
         run_dir = args.out_dir if args.out_dir.is_absolute() else (_REPO_ROOT / args.out_dir)
@@ -563,6 +639,9 @@ def main(argv: list[str] | None = None) -> int:
             device=device,
             mixed_precision=not args.no_mixed_precision,
             random_seed=args.seed,
+            neighbor_window_days=args.neighbor_window_days,
+            positive_channel_mask_pct=args.positive_channel_mask_pct,
+            positive_time_jitter_days=args.positive_time_jitter_days,
         )
         trainer_holder["trainer"] = trainer
         result = trainer.train(train_idx, val_idx)
@@ -598,7 +677,10 @@ def main(argv: list[str] | None = None) -> int:
             "proj_dim": PROJ_DIM,
             "mask_ratio": MASK_RATIO,
             "ntx_temperature": NTX_TEMPERATURE,
-            "neighbor_window_days": NEIGHBOR_WINDOW_DAYS,
+            "neighbor_window_days": args.neighbor_window_days,
+            "positive_channel_mask_pct": args.positive_channel_mask_pct,
+            "positive_time_jitter_days": args.positive_time_jitter_days,
+            "variant_suffix": args.variant_suffix,
             "param_count": n_params,
             "epochs_planned": args.epochs,
             "epochs_trained": len(loss_history),
