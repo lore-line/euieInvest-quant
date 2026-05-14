@@ -277,9 +277,18 @@ def main(argv: list[str] | None = None) -> int:
                     break
                 batch_indices = indices[start : start + args.batch_size]
                 xs = torch.stack([ds[i][0] for i in batch_indices]).to(device, non_blocking=True)
+                # Run the encoder in autocast (fp16 on CUDA) for speed, but
+                # move the heads + loss computation OUTSIDE autocast so the
+                # fp32 gradient graph is clean. Calling `heads(h.float())`
+                # inside autocast leaves some intermediate tensors in fp16
+                # (autocast applies to nn.Linear regardless of input dtype),
+                # which breaks `total.backward()` with
+                # "Found dtype Float but expected Half". Track 8's working
+                # pattern is the reference: encoder under autocast, heads out.
                 with torch.amp.autocast(device_type=device.type, enabled=device.type == "cuda"):
                     h = encoder.encode(xs).mean(dim=1)
-                    preds = heads(h.float())
+                h = h.float()
+                preds = heads(h)
                 losses = {}
                 for t in TASKS:
                     y = torch.tensor(train_labels[f"lbl_{t}"][batch_indices], device=device, dtype=torch.float32)
@@ -312,7 +321,8 @@ def main(argv: list[str] | None = None) -> int:
                     xs = torch.stack([val_ds[i][0] for i in range(start, end)]).to(device, non_blocking=True)
                     with torch.amp.autocast(device_type=device.type, enabled=device.type == "cuda"):
                         h = encoder.encode(xs).mean(dim=1)
-                        preds = heads(h.float())
+                    h = h.float()
+                    preds = heads(h)
                     for t in TASKS:
                         val_preds[t].append(torch.sigmoid(preds[t]).cpu().numpy())
                     val_preds["sector_rank"].append(preds["sector_rank"].cpu().numpy())
@@ -357,7 +367,8 @@ def main(argv: list[str] | None = None) -> int:
             xs = torch.stack([val_ds[int(i)][0] for i in ids]).to(device).requires_grad_(True)
             with torch.amp.autocast(device_type=device.type, enabled=device.type == "cuda"):
                 h = encoder.encode(xs).mean(dim=1)
-                preds = heads(h.float())
+            h = h.float()
+            preds = heads(h)
             for t in TASKS + ["sector_rank"]:
                 if xs.grad is not None:
                     xs.grad.zero_()
