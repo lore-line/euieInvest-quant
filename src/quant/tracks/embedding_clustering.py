@@ -275,6 +275,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  wrote {membership_path.relative_to(_REPO_ROOT)}  ({membership_df.height:,} rows)")
 
         # UMAP 2D projection on a 20K sample (UMAP on 600K is slow).
+        # UMAP is purely informational — used for human-eyeballing the embedding
+        # space; nothing downstream consumes umap-projection.parquet. So any
+        # failure here is non-fatal.
+        #
+        # ImportError: UMAP isn't installed (some environments skip it).
+        # OSError: Python's import-cache (`_fill_cache` → `os.listdir`) can fail
+        #   with EINVAL on Windows when a cloud-sync engine (Nextcloud, OneDrive,
+        #   etc.) holds a transient handle on a sys.path directory.
+        #   Observed: `OSError: [Errno 22] Invalid argument: '/workspace/src'`.
+        # Either way, the cluster artifacts are already on disk; we don't want
+        # the manifest write below to be skipped because of a visualization
+        # detail.
         try:
             import umap  # type: ignore[import]
             print("  UMAP 2D projection ...")
@@ -300,6 +312,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    UMAP in {time.perf_counter() - t_u:.1f}s → wrote {umap_path.relative_to(_REPO_ROOT)}")
         except ImportError:
             print("  UMAP skipped — install umap-learn for the umap-projection.parquet artifact")
+        except OSError as exc:
+            print(f"  UMAP skipped — OS-level import failure (likely cloud-sync handle on sys.path): {exc}")
+        except Exception as exc:  # noqa: BLE001 — UMAP is informational; never block the run
+            print(f"  UMAP skipped — unexpected error in projection: {type(exc).__name__}: {exc}")
 
         # Skeleton clustering-comparison.md — full narrative requires Track 2 cluster IDs to compare.
         comparison_md = run_dir / "clustering-comparison.md"

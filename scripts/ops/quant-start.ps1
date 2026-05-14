@@ -126,8 +126,8 @@ if (-not (Test-Path $QuantRunsDir)) {
     New-Item -ItemType Directory -Path $QuantRunsDir -Force | Out-Null
 }
 
-# `--restart on-failure:5` survives:
-#   - container crash / OOM (non-zero exit → restart up to 5 times;
+# `--restart on-failure:2` survives:
+#   - container crash / OOM (non-zero exit → restart up to 2 times;
 #     entrypoint re-reads latest.pt)
 #   - host reboot mid-training (the kernel SIGKILLs the container =
 #     non-zero exit → Docker daemon re-launches it on startup, entrypoint
@@ -136,15 +136,20 @@ if (-not (Test-Path $QuantRunsDir)) {
 #   - clean training completion (exit 0 → no restart). This is the bug
 #     `unless-stopped` introduced: when training writes state=done and
 #     the python process exits 0, `unless-stopped` would auto-restart
-#     the container. The next launch would see state=done, deterministically
-#     rewrite the same encoder.pt/manifest/losses, exit 0, and loop forever.
-#     `on-failure` exits the loop on clean completion.
+#     the container. `on-failure` exits the loop on clean completion.
 #   - user-initiated stop (docker stop sends SIGTERM → SIGINT-graceful
 #     handler in the script causes exit 0 → no restart). So quant-stop.ps1
 #     produces a real pause that persists across reboots, same as before.
+# Why 2 and not 5: deterministic crashes (e.g. a code bug that crashes
+# every time) burn ~15 min per retry on Track 7's HDBSCAN+k-means stack.
+# Observed: a UMAP-import OSError after the k-means succeeded — the
+# restart wasted compute re-running embedding/HDBSCAN/k-means only to
+# crash again. 2 attempts is enough to cover transient host-level issues
+# (reboot, networking blip) without spending an hour on a deterministic
+# bug. Bump if Track F-v2 or similar needs more host-reboot tolerance.
 $dockerArgs = @(
     'run', '-d',
-    '--restart', 'on-failure:5',
+    '--restart', 'on-failure:2',
     '--name', $ContainerName,
     '-v', "${RepoRoot}:/workspace",
     '-v', "${QuantRunsDir}:/workspace/runs",
