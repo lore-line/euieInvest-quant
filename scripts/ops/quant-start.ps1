@@ -115,6 +115,15 @@ if ($Resume) {
 $GpuArgs = @('--runtime', 'nvidia', '-e', 'NVIDIA_VISIBLE_DEVICES=all',
              '-e', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility')
 
+# API URL for tracks that need live data (Track 11's sector_rel_rank label
+# fetches /api/v1/symbols if the cached data/snapshots/symbols.json isn't
+# present). Default to the claudehost Tailscale IP if the host env var
+# isn't set. Override per-launch with QUANT_API_URL.
+$ApiUrl = if ($env:EUIEINVEST_API_BASE_URL) { $env:EUIEINVEST_API_BASE_URL }
+          elseif ($env:QUANT_API_URL) { $env:QUANT_API_URL }
+          else { 'http://100.68.86.56:8443' }
+$ApiArgs = @('-e', "EUIEINVEST_API_BASE_URL=$ApiUrl")
+
 # Runs/ override: keep training artifacts OUT of any cloud-sync folder.
 # Cloud-sync engines (Nextcloud / OneDrive / Dropbox / iCloud) hold
 # transient file handles on hot-modified files and cause atomic-rename
@@ -154,7 +163,7 @@ $dockerArgs = @(
     '-v', "${RepoRoot}:/workspace",
     '-v', "${QuantRunsDir}:/workspace/runs",
     '-w', '/workspace'
-) + $GpuArgs + @('euieinvest-quant:latest') + $cmd
+) + $GpuArgs + $ApiArgs + @('euieinvest-quant:latest') + $cmd
 
 if ($DryRun) {
     Write-Host "DRY RUN — would execute:" -ForegroundColor Cyan
