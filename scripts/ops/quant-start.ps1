@@ -58,7 +58,10 @@ param(
         'step3i_concept_bottleneck',
         'step3j_generative_winners',
         'step3k_multitask_finetune',
-        'step3l_dl_counterfactual'
+        'step3l_dl_counterfactual',
+        # Phase C foundation v2 variants (parallel research-grade encoder A/B)
+        'step3f_foundation_pretrain_v2_temporal',
+        'step3f_foundation_pretrain_v2_sequence_order'
     )]
     [string]$Track,
 
@@ -85,6 +88,20 @@ $TrackCommands = @{
     'step3j_generative_winners'       = @('python', '-m', 'quant.tracks.generative_winners')
     'step3k_multitask_finetune'       = @('python', '-m', 'quant.tracks.multitask_finetune')
     'step3l_dl_counterfactual'        = @('python', '-m', 'quant.tracks.dl_counterfactual')
+    # Track F-v2 temporal-augmentation: widen ±5d → ±20d, add 10% channel mask + ±3d jitter
+    'step3f_foundation_pretrain_v2_temporal' = @(
+        'python', '-m', 'quant.tracks.foundation_pretrain',
+        '--neighbor-window-days', '20',
+        '--positive-channel-mask-pct', '0.10',
+        '--positive-time-jitter-days', '3',
+        '--variant-suffix', '_v2_temporal'
+    )
+    # Track F-v2-prime sequence-order pretext A/B (not yet implemented;
+    # placeholder for parity with the tray ValidateSet)
+    'step3f_foundation_pretrain_v2_sequence_order' = @(
+        'python', '-c',
+        'raise NotImplementedError("Track F-v2-prime sequence-order pretext not yet implemented")'
+    )
 }
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
