@@ -145,7 +145,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--cluster-membership", type=Path,
         default=Path("runs/2026-05-14-step3g_embedding_clustering/cluster-membership.parquet"),
-        help="Track 7 cluster-membership.parquet (used when --universe is cluster-7-*).",
+        help="Track 7 (original) cluster-membership.parquet — or the walk-forward "
+             "equivalent (runs/2026-05-14-step4_walkforward_cluster_id/"
+             "cluster-membership-walkforward.parquet) to test the universe filter "
+             "without forward-look bias. Used when --universe is cluster-7-*.",
+    )
+    p.add_argument(
+        "--cluster-id", type=int, default=7,
+        help="Cluster ID to filter on when --universe is cluster-7-*. "
+             "Track 7 original uses cluster 7; the walk-forward cluster ID may "
+             "differ (e.g. cluster 8). Match the cluster-membership file you pass.",
     )
     p.add_argument("--out-dir", type=Path, default=None)
     p.add_argument("--start", type=date.fromisoformat, default=date(2024, 1, 1))
@@ -301,7 +310,8 @@ def main(argv: list[str] | None = None) -> int:
         cluster_symbols_filter: set[str] | None = None
         if args.universe in ("cluster-7-rows", "cluster-7-symbols"):
             cm_path = args.cluster_membership if args.cluster_membership.is_absolute() else (_REPO_ROOT / args.cluster_membership)
-            cm = pl.read_parquet(cm_path).filter(pl.col("cluster_id") == 7)
+            cm = pl.read_parquet(cm_path).filter(pl.col("cluster_id") == args.cluster_id)
+            print(f"  cluster-membership source: {cm_path.relative_to(_REPO_ROOT)} (filtered to cluster_id={args.cluster_id})")
             if args.universe == "cluster-7-rows":
                 cluster_membership_filter = cm.select(["symbol", "date"]).unique()
                 print(f"  universe filter: cluster-7-rows → {cluster_membership_filter.height:,} (symbol, date) pairs")
@@ -627,6 +637,9 @@ def main(argv: list[str] | None = None) -> int:
                 "universe": args.universe,
                 "min_val_lift": args.min_val_lift,
                 "per_rule_exits": args.per_rule_exits,
+                # Phase B v3 flag
+                "cluster_id": args.cluster_id,
+                "cluster_membership_path": str(args.cluster_membership),
             },
             "results": {
                 "total_pnl_usd": round(total_pnl, 2),
