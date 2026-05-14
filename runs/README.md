@@ -5,14 +5,23 @@ Training artifacts (checkpoints, status.json, per-run dirs) live at
 
 ## Why
 
-This repo lives in a Nextcloud-synced directory. Nextcloud / OneDrive
-/ Dropbox / iCloud / Google Drive all hold transient file handles on
-hot-modified files to push them upstream. Training writes
-`latest.pt` (~700 MB) every epoch and `status.json` ~50 times per
-epoch. Those hot-rewrite patterns collide with the sync engine's
-read-handle in a window of seconds, causing `os.replace` to fail
-with `PermissionError`. This bit Track F at end-of-epoch-4 on
-2026-05-13 (see `lore-line/euieInvest-quant@3719bb9` post-mortem).
+Originally this repo lived in a Nextcloud-synced directory and the
+runs/ separation was the structural fix for cloud-sync atomic-rename
+failures. The repo has since been moved entirely out of Nextcloud
+(to `D:\repos\euieInvestDeepLearn\` on 2026-05-14, after Track 8's
+import-cache OSErrors made the broader problem unavoidable), so the
+**source tree no longer sits in a cloud-sync dir**. The runs/
+separation is kept anyway because:
+
+1. Training artifacts (especially `latest.pt` at ~700 MB rewritten
+   every epoch, `status.json` ~50 times per epoch) belong on fast
+   local storage, not bound to git.
+2. The setup is portable: any host that wants to run training can
+   override `QUANT_RUNS_DIR` without touching the source tree.
+3. The historical bug bit Track F at end-of-epoch-4 on 2026-05-13
+   (see `lore-line/euieInvest-quant@3719bb9` post-mortem) — the
+   defense-in-depth retry wrapper is still in place for environments
+   that do live in cloud-sync directories.
 
 ## How
 
