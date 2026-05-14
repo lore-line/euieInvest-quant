@@ -237,8 +237,25 @@ def main(argv: list[str] | None = None) -> int:
                     ))
                 i += h_np.shape[0]
         all_embs_arr = np.concatenate(all_embs, axis=0)
-        # Nearest training-window per prototype.
-        d2 = ((all_embs_arr[None, :, :] - prototype_vecs[:, None, :]) ** 2).sum(axis=-1)
+        # Nearest training-window per prototype. The naive broadcast
+        # `((all_embs_arr[None, :, :] - prototype_vecs[:, None, :]) ** 2).sum(axis=-1)`
+        # creates a (50, 1.6M, 768) intermediate array ≈ 235 GB on a typical
+        # Phase A train set; the OS OOM-kills the process. Compute pairwise
+        # squared distances in CPU chunks of 8K rows × 50 prototypes (≈ 1.5 MB
+        # per chunk after sum) so peak RAM stays bounded regardless of dataset
+        # size. d2 result itself is (50, N_train) ≈ 320 MB for 1.6M windows —
+        # fine to materialize once and reuse for the top-10 neighbor count below.
+        n_train = all_embs_arr.shape[0]
+        d2 = np.empty((args.n_prototypes, n_train), dtype=np.float32)
+        chunk = 8192
+        proto_sq = (prototype_vecs ** 2).sum(axis=1)  # (N,)
+        for s in range(0, n_train, chunk):
+            e = min(s + chunk, n_train)
+            x = all_embs_arr[s:e]  # (C, D)
+            x_sq = (x ** 2).sum(axis=1)  # (C,)
+            # ||a-b||^2 = ||a||^2 + ||b||^2 - 2 a·b — faster + bounded memory.
+            cross = prototype_vecs @ x.T  # (N, C)
+            d2[:, s:e] = (proto_sq[:, None] + x_sq[None, :] - 2.0 * cross).astype(np.float32)
         nearest_idx = d2.argmin(axis=1)  # (N,)
         proto_rows = []
         for pid in range(args.n_prototypes):
