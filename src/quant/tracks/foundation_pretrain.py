@@ -261,13 +261,18 @@ class MaskedContrastiveDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.T
         pos_sym, pos_local = self.index.endpoints[pos_pos]
 
         # Track F-v2: optional ±jitter on the positive's local_end. Constrained
-        # to stay within the symbol's valid window range (we have a per-symbol
-        # start that maps local_end → global window slice).
+        # to stay within the symbol's valid endpoint range. local_end is NOT a
+        # 0-indexed position — it's a local_end value where a valid 60-bar
+        # window can be formed (so the minimum is at least WINDOW-1 = 59 within
+        # the symbol's history, and the maximum is the last endpoint). Reading
+        # the valid range straight from the endpoints array is the safe way to
+        # clamp.
         if self.positive_time_jitter_days > 0:
             jitter = _random.randint(-self.positive_time_jitter_days, self.positive_time_jitter_days)
-            sym_n_windows = int((self.index.endpoints[:, 0] == pos_sym).sum())
-            # local_end ∈ [0, sym_n_windows-1]; clamp so we don't run off the end.
-            pos_local_jittered = int(max(0, min(sym_n_windows - 1, pos_local + jitter)))
+            cohort_locals = self.index.endpoints[self._endpoints_by_sym[pos_sym], 1]
+            local_min = int(cohort_locals.min())
+            local_max = int(cohort_locals.max())
+            pos_local_jittered = int(max(local_min, min(local_max, int(pos_local) + jitter)))
             pos_local = pos_local_jittered
 
         positive = self._window_zscored(pos_sym, pos_local)
