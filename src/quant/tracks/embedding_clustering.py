@@ -34,7 +34,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 import torch
-from sklearn.cluster import HDBSCAN
+from sklearn.cluster import HDBSCAN, KMeans
 from sklearn.neighbors import NearestNeighbors
 
 from quant.data.windows import CHANNELS, WINDOW, build_window_index
@@ -97,6 +97,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--val-end", type=date.fromisoformat, default=date(2024, 12, 31))
     p.add_argument("--hdbscan-min-cluster-size", type=int, default=200)
     p.add_argument("--hdbscan-sample-size", type=int, default=30_000)
+    p.add_argument(
+        "--kmeans-fallback-k",
+        type=int,
+        default=10,
+        help=(
+            "If HDBSCAN finds 0 clusters (the encoder's manifold lacks "
+            "density gaps but may still carry label signal — diagnosed for "
+            "Track F's encoder via scripts/diagnose_track_f_encoder.py), "
+            "fall back to k-means with this many clusters. Set to 0 to "
+            "disable the fallback and let the run exit with zero clusters."
+        ),
+    )
     p.add_argument("--umap-sample-size", type=int, default=20_000)
     p.add_argument("--resume", default=None)
     return p.parse_args(argv)
@@ -184,11 +196,31 @@ def main(argv: list[str] | None = None) -> int:
         nn = NearestNeighbors(n_neighbors=1).fit(embs_sample)
         _, neighbor_idx = nn.kneighbors(embs)
         labels = sample_labels[neighbor_idx[:, 0]]
+        n_hdbscan_clusters = len(set(labels.tolist()) - {-1})
         print(
-            f"    {len(set(labels.tolist()) - {-1})} clusters, "
+            f"    {n_hdbscan_clusters} clusters, "
             f"{int((labels == -1).sum()):,} outliers, "
             f"{time.perf_counter() - t_clu:.1f}s"
         )
+
+        # K-means fallback. HDBSCAN can return 0 clusters when the embedding
+        # manifold is smoothly continuous without density gaps — which is the
+        # case for Track F's encoder (diagnosed via
+        # scripts/diagnose_track_f_encoder.py: k-means k=10 finds clusters
+        # with winner_fraction spread 0.117-0.411 vs base 0.227). When HDBSCAN
+        # finds nothing, fall back to k-means so the run produces usable
+        # clusters.parquet instead of crashing on the downstream empty-DF
+        # path. The algorithm field in clusters.parquet reflects which method
+        # actually produced the clusters.
+        algorithm = "hdbscan_on_encoder_embeddings"
+        if n_hdbscan_clusters == 0 and args.kmeans_fallback_k > 0:
+            k = args.kmeans_fallback_k
+            print(f"  HDBSCAN found 0 clusters; falling back to k-means k={k} on full embedding set ...")
+            t_km = time.perf_counter()
+            km = KMeans(n_clusters=k, n_init=10, random_state=42)
+            labels = km.fit_predict(embs)
+            algorithm = f"kmeans_k{k}_on_encoder_embeddings"
+            print(f"    k-means done in {time.perf_counter() - t_km:.1f}s — {k} clusters")
 
         # Cluster signatures (means of embedding values per cluster — abstract,
         # but the winners-fraction-per-cluster is the meaningful signal).
@@ -205,8 +237,8 @@ def main(argv: list[str] | None = None) -> int:
                 for i in members[:20]
             ]
             cluster_rows.append({
-                "algorithm": "hdbscan_on_encoder_embeddings",
-                "k": 0,
+                "algorithm": algorithm,
+                "k": len(unique_clusters) if algorithm.startswith("kmeans") else 0,
                 "cluster_id": int(cid),
                 "size": n_members,
                 "n_winners": n_winners,
@@ -218,8 +250,8 @@ def main(argv: list[str] | None = None) -> int:
                 membership_rows.append({
                     "symbol": str(symbols[i]),
                     "date": dates[i],
-                    "algorithm": "hdbscan_on_encoder_embeddings",
-                    "k": 0,
+                    "algorithm": algorithm,
+                    "k": len(unique_clusters) if algorithm.startswith("kmeans") else 0,
                     "cluster_id": int(cid),
                 })
 
@@ -227,7 +259,17 @@ def main(argv: list[str] | None = None) -> int:
         clusters_path = run_dir / "clusters.parquet"
         clusters_df.write_parquet(clusters_path)
         print(f"  wrote {clusters_path.relative_to(_REPO_ROOT)}  ({clusters_df.height} clusters)")
-        membership_df = pl.DataFrame(membership_rows).with_columns(pl.col("date").str.to_date())
+        # Guard against zero clusters (e.g. HDBSCAN finds nothing and
+        # --kmeans-fallback-k=0). The .with_columns(date.str.to_date) call
+        # below explodes on a 0-row 0-column DataFrame ("unable to find
+        # column 'date'") — the original bug that crashed the first Track 7
+        # run before the k-means fallback existed.
+        if membership_rows:
+            membership_df = pl.DataFrame(membership_rows).with_columns(pl.col("date").str.to_date())
+        else:
+            membership_df = pl.DataFrame(
+                schema={"symbol": pl.Utf8, "date": pl.Date, "algorithm": pl.Utf8, "k": pl.Int64, "cluster_id": pl.Int64}
+            )
         membership_path = run_dir / "cluster-membership.parquet"
         membership_df.write_parquet(membership_path)
         print(f"  wrote {membership_path.relative_to(_REPO_ROOT)}  ({membership_df.height:,} rows)")
@@ -263,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         comparison_md = run_dir / "clustering-comparison.md"
         comparison_md.write_text(
             "# Track 7 vs Track 2 clustering comparison\n\n"
-            f"Track 7 (HDBSCAN on Track F encoder embeddings): "
+            f"Track 7 ({algorithm}): "
             f"{len(unique_clusters)} clusters, {int((labels == -1).sum()):,} outliers.\n\n"
             "Cross-method comparison (Jaccard overlap of cluster memberships) — "
             "left for the synthesis stage once both tracks' cluster-membership.parquet "
@@ -280,10 +322,13 @@ def main(argv: list[str] | None = None) -> int:
             "encoder_path": str(encoder_path.relative_to(_REPO_ROOT)),
             "encoder_d_model": int(embs.shape[1]),
             "n_holdout_windows": int(embs.shape[0]),
+            "algorithm": algorithm,
+            "n_hdbscan_clusters": int(n_hdbscan_clusters),
             "n_clusters": len(unique_clusters),
             "n_outliers": int((labels == -1).sum()),
             "hdbscan_min_cluster_size": args.hdbscan_min_cluster_size,
             "hdbscan_sample_size": sample_n,
+            "kmeans_fallback_k": args.kmeans_fallback_k,
             "umap_sample_size": args.umap_sample_size,
             "runtime_device": str(device),
             "train_wall_clock_s": wall_clock_s,
