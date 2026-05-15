@@ -576,13 +576,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     t0 = time.perf_counter()
     pipeline_step = f"step3f_foundation_pretrain{args.variant_suffix}"
-    run_date_str = date.today().isoformat()
-    if args.out_dir is not None:
-        run_dir = args.out_dir if args.out_dir.is_absolute() else (_REPO_ROOT / args.out_dir)
-        run_date_str = run_dir.name[:10]
-    else:
-        run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    # Resolve run_dir using the resume-friendly helper. Survives UTC date
+    # rollover during a resume — if a run dir with this pipeline_step
+    # already has a latest.pt, reuse it instead of creating a fresh
+    # today-dated dir. See tracks.resolve_run_dir docstring for the
+    # 2026-05-15 Track F-v2 midnight restart bug context.
+    from quant.tracks import resolve_run_dir
+    run_dir, run_date_str = resolve_run_dir(
+        pipeline_step=pipeline_step,
+        out_dir_arg=args.out_dir,
+        repo_root=_REPO_ROOT,
+        resume_checkpoint_filename="latest.pt",
+    )
 
     status = RunStatus(dir=run_dir, run_id=make_run_id(run_date_str, pipeline_step), pipeline_step=pipeline_step, epoch_total=args.epochs)
     trainer_holder: dict[str, FoundationTrainer | None] = {"trainer": None}

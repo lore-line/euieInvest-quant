@@ -110,13 +110,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     t0 = time.perf_counter()
     pipeline_step = "step3j_generative_winners"
-    run_date_str = date.today().isoformat()
-    if args.out_dir is not None:
-        run_dir = args.out_dir if args.out_dir.is_absolute() else (_REPO_ROOT / args.out_dir)
-        run_date_str = run_dir.name[:10]
-    else:
-        run_dir = _REPO_ROOT / "runs" / f"{run_date_str}-{pipeline_step}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    from quant.tracks import resolve_run_dir
+    run_dir, run_date_str = resolve_run_dir(
+        pipeline_step=pipeline_step,
+        out_dir_arg=args.out_dir,
+        repo_root=_REPO_ROOT,
+        resume_checkpoint_filename="latest.pt",
+    )
 
     status = RunStatus(dir=run_dir, run_id=make_run_id(run_date_str, pipeline_step), pipeline_step=pipeline_step, epoch_total=args.epochs)
     stop_flag = {"stop": False}
