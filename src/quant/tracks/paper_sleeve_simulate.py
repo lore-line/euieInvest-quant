@@ -164,6 +164,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Fraction of sleeve per signal (brief: 0.05-0.15).")
     p.add_argument("--max-concurrent", type=int, default=4,
                    help="Max concurrent positions. Use -1 for unlimited (rule-cohort PnL baseline).")
+    p.add_argument("--cash-aware", action="store_true",
+                   help="Reject new positions when remaining cash (sleeve_usd minus sum of "
+                        "open positions' notional) is less than the per-position notional. "
+                        "Combined with --max-concurrent -1, gives the realistic 'unlimited "
+                        "concurrency within cash discipline' baseline that exposes whether "
+                        "the selector or the cash cap is the binding constraint.")
     p.add_argument("--slippage-pct", type=float, default=0.001, help="Per-leg.")
     # Default exit thresholds (--per-rule-exits=fixed). Label-aware mode
     # overrides these from rule source.
@@ -428,6 +434,7 @@ def main(argv: list[str] | None = None) -> int:
         rejected_concurrent_cap = 0
         rejected_already_held = 0
         rejected_size_too_small = 0
+        rejected_cash_constrained = 0
         max_concurrent_effective = float("inf") if args.max_concurrent < 0 else args.max_concurrent
 
         # Group signals by signal_date so we can apply the ranker per day.
@@ -462,11 +469,20 @@ def main(argv: list[str] | None = None) -> int:
                 day_signals.sort(key=lambda x: x[2], reverse=True)  # by expected_lift desc
 
             # 3) Try to open each signal in (ranked or chronological-ish) order.
+            target_position_size_usd = args.sleeve_usd * args.position_size_pct
             for symbol, rule_key, expected_lift in day_signals:
                 if len(open_positions) >= max_concurrent_effective:
                     # Count remaining as concurrent-capped rejections.
                     rejected_concurrent_cap += 1
                     continue
+                if args.cash_aware:
+                    # Cash discipline: don't open if our open exposure plus this position
+                    # would exceed sleeve_usd. This enables the "unlimited within cash"
+                    # baseline that frames whether the selector or the cash cap is binding.
+                    open_exposure = sum(p.position_size_usd for p in open_positions)
+                    if open_exposure + target_position_size_usd > args.sleeve_usd:
+                        rejected_cash_constrained += 1
+                        continue
                 if symbol not in symbol_price_table:
                     rejected_no_price += 1
                     continue
@@ -529,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"  positions opened: {len(closed_positions):,}")
         print(f"  rejections: concurrent_cap={rejected_concurrent_cap:,}, "
+              f"cash_constrained={rejected_cash_constrained:,}, "
               f"already_held={rejected_already_held:,}, "
               f"size_too_small={rejected_size_too_small:,}, "
               f"no_price={rejected_no_price:,}")
@@ -601,6 +618,7 @@ def main(argv: list[str] | None = None) -> int:
                 "exit_reasons": dict(exit_reasons),
                 "rejections": {
                     "concurrent_cap": rejected_concurrent_cap,
+                    "cash_constrained": rejected_cash_constrained,
                     "already_held": rejected_already_held,
                     "size_too_small": rejected_size_too_small,
                     "no_price": rejected_no_price,
@@ -628,6 +646,7 @@ def main(argv: list[str] | None = None) -> int:
                 "sleeve_usd": args.sleeve_usd,
                 "position_size_pct": args.position_size_pct,
                 "max_concurrent": args.max_concurrent,
+                "cash_aware": args.cash_aware,
                 "slippage_pct": args.slippage_pct,
                 "target_pct": args.target_pct,
                 "stop_pct": args.stop_pct,
