@@ -165,11 +165,17 @@ def main(argv: list[str] | None = None) -> int:
         encoder_path = args.encoder_path or _find_latest_encoder()
         if encoder_path is None:
             raise FileNotFoundError("no Track F encoder found")
+        if not encoder_path.is_absolute():
+            encoder_path = _REPO_ROOT / encoder_path
+        if not encoder_path.exists():
+            raise FileNotFoundError(f"Track F encoder not found at {encoder_path}")
         clf_ckpt_path = args.classifier_checkpoint or _find_latest_proto()
         if clf_ckpt_path is None:
             raise FileNotFoundError(
                 "no Track 8 prototype-layer checkpoint found — run step3h_prototype_learning first"
             )
+        if not clf_ckpt_path.is_absolute():
+            clf_ckpt_path = _REPO_ROOT / clf_ckpt_path
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         encoder = _load_encoder(encoder_path, device)
         for p in encoder.parameters():

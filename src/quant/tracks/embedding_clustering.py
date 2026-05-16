@@ -152,10 +152,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         encoder_path = args.encoder_path or _find_latest_encoder()
-        if encoder_path is None or not encoder_path.exists():
+        if encoder_path is None:
             raise FileNotFoundError(
                 "no Track F encoder found — run step3f_foundation_pretrain first or pass --encoder-path"
             )
+        if not encoder_path.is_absolute():
+            encoder_path = _REPO_ROOT / encoder_path
+        if not encoder_path.exists():
+            raise FileNotFoundError(f"Track F encoder not found at {encoder_path}")
         print(f"track 7 (embedding clustering) — encoder: {encoder_path.relative_to(_REPO_ROOT)}")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
