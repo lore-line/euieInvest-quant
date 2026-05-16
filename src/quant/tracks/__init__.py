@@ -9,6 +9,7 @@ encoder landing.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import date
 from pathlib import Path
@@ -118,4 +119,55 @@ def resolve_run_dir(
     run_dir = runs_root / f"{run_date_str}-{pipeline_step}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir, run_date_str
+
+
+def verify_encoder_sha(
+    encoder_path: Path,
+    expected_sha: str | None = None,
+) -> str:
+    """Compute SHA256 of an encoder.pt and optionally enforce a pinned value.
+
+    Defense against silent encoder swaps — a downstream track that was
+    authorized against encoder ``X`` should fail loudly (not silently
+    consume a different encoder) if ``encoder.pt`` at the same path has
+    been overwritten by a re-run of ``foundation_pretrain.py`` with
+    different settings.
+
+    Usage pattern in a downstream track::
+
+        encoder_path = ...  # resolved from --encoder-path or auto-detect
+        encoder_sha = verify_encoder_sha(
+            encoder_path,
+            expected_sha=args.expected_encoder_sha,  # CLI flag, may be None
+        )
+        # ... record encoder_sha in this track's own manifest.json for traceability
+
+    Args:
+        encoder_path: Path to the encoder ``.pt`` file. Must already be resolved
+            to absolute or relative-to-cwd; this function does not resolve paths.
+        expected_sha: Optional pinned hex SHA256. Tolerates both
+            ``"sha256:abc..."`` and bare ``"abc..."`` forms (case-insensitive).
+            When ``None``, no enforcement — just returns the actual SHA so the
+            caller can record it for posterity.
+
+    Returns:
+        The actual SHA256 of ``encoder_path`` as a lowercase hex string (64 chars).
+
+    Raises:
+        ValueError: if ``expected_sha`` is set and doesn't match the actual SHA.
+    """
+    sha = hashlib.sha256(encoder_path.read_bytes()).hexdigest()
+    if expected_sha is not None:
+        expected_clean = expected_sha.removeprefix("sha256:").strip().lower()
+        if sha != expected_clean:
+            raise ValueError(
+                f"Encoder SHA mismatch for {encoder_path}:\n"
+                f"  expected: sha256:{expected_clean}\n"
+                f"  actual:   sha256:{sha}\n"
+                f"The encoder file may have been swapped or corrupted since this "
+                f"run was authorized. If this is intentional (e.g. you re-ran "
+                f"foundation_pretrain and want the new encoder), update the "
+                f"--expected-encoder-sha argument."
+            )
+    return sha
 
