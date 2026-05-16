@@ -155,6 +155,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "the entries Claude will actually weight in conviction bumps.",
     )
     p.add_argument(
+        "--entry-cluster-membership", type=Path,
+        default=Path("runs/2026-05-14-step4_walkforward_cluster_id/cluster-membership-walkforward.parquet"),
+        help="Path to cluster-membership parquet. Used together with "
+             "--entry-cluster-id to restrict entries to the v1-encoder "
+             "walk-forward cluster-of-interest universe (Phase B v3's +28%% / "
+             "Sharpe 1.88 deployment baseline).",
+    )
+    p.add_argument(
+        "--entry-cluster-id", type=int, default=None,
+        help="Filter entries to (symbol, date) pairs in this cluster. None = no "
+             "cluster filter (Stage 2.0 baseline). 8 = v1 WF cluster-of-interest "
+             "(Stage 2.1 finding — tighter entries to address the gain gate).",
+    )
+    p.add_argument(
         "--train-cutoff", type=date.fromisoformat, default=DEFAULT_TRAIN_CUTOFF,
         help="Chronological split: train ≤ cutoff, validate > cutoff.",
     )
@@ -634,6 +648,21 @@ def main(argv: list[str] | None = None) -> int:
     n_before_strength = entries_holdout.height
     entries_holdout = entries_holdout.filter(pl.col("signal_strength") >= args.entry_min_strength)
     print(f"  entries: {n_before_strength:,} historical → {entries_holdout.height:,} after signal_strength ≥{args.entry_min_strength} filter")
+
+    # Optional cluster-of-interest filter (Stage 2.1 — addresses the gain-gate
+    # binding constraint from Stage 2.0 by restricting entries to the v1
+    # walk-forward cluster Phase B v3 deployed against)
+    if args.entry_cluster_id is not None:
+        cm_path = _resolve_path(args.entry_cluster_membership)
+        print(f"  cluster filter: {cm_path.relative_to(_REPO_ROOT)} (cluster_id={args.entry_cluster_id})")
+        cm = pl.read_parquet(cm_path).filter(pl.col("cluster_id") == args.entry_cluster_id)
+        # cluster-membership has (symbol, date) — date is polars.Date
+        # entries_holdout's signal_date is String (per the historical-generation logic).
+        # Convert the membership date to String to match for the inner join.
+        cm = cm.with_columns(pl.col("date").cast(pl.String).alias("signal_date")).select(["symbol", "signal_date"]).unique()
+        n_before_cluster = entries_holdout.height
+        entries_holdout = entries_holdout.join(cm, on=["symbol", "signal_date"], how="inner")
+        print(f"  entries: {n_before_cluster:,} → {entries_holdout.height:,} after cluster filter ({(entries_holdout.height/max(n_before_cluster,1))*100:.1f}% retained)")
     print(f"  train cutoff: {args.train_cutoff} | holdout end: {args.holdout_end}")
     print(f"  eligibility window: {args.exit_eligibility_days}d | hard cap: {args.joint_cap_days}d")
 
@@ -719,6 +748,8 @@ def main(argv: list[str] | None = None) -> int:
         "entry_min_val_lift": args.entry_min_val_lift,
         "entry_dedup_days": args.entry_dedup_days,
         "entry_min_strength": args.entry_min_strength,
+        "entry_cluster_membership_path": str(_resolve_path(args.entry_cluster_membership).relative_to(_REPO_ROOT)) if args.entry_cluster_id is not None else None,
+        "entry_cluster_id": args.entry_cluster_id,
         "variants_evaluated": args.variants,
         "n_entries_in_holdout": int(entries_holdout.height),
         "wall_clock_s": round(time.perf_counter() - t0, 3),
