@@ -57,11 +57,57 @@ class SustainedWinnerSpec:
         return f"is_sustained_winner_{self.name}"
 
 
-# The two canonical specs
+# The two canonical specs from the original direction (kept for back-compat
+# in tests; the production discovery sweeps via `sweep_specs` below)
 SPECS: dict[str, SustainedWinnerSpec] = {
     "standard": SustainedWinnerSpec("standard", 20.0, 10.0),
     "strict": SustainedWinnerSpec("strict", 20.0, 20.0),
 }
+
+
+def sweep_specs(
+    g_max_pct: float = 20.0,
+    g_min_pct: float = 1.0,
+    step_pct: float = 1.0,
+    endpoint_ratio: float = 0.5,
+    horizon_days: int = 30,
+    min_entry_price_usd: float = 1.00,
+) -> list[SustainedWinnerSpec]:
+    """Generate a list of specs for the Pareto-frontier gain sweep
+    (PR #1 issuecomment 2026-05-17 03:18 + 03:20 server-team refinements).
+
+    For each g% in [g_min_pct, g_max_pct] (stepped by step_pct, DESCENDING
+    so the discovery can stop at the highest g that clears gates):
+
+      spec = SustainedWinnerSpec(
+        name = f"g{g_pct:02d}",
+        touch_threshold_pct = g_pct,
+        endpoint_threshold_pct = g_pct * endpoint_ratio,  # default g/2
+      )
+
+    Default range 20% → 1% with 1% step → 20 specs. Hard floor at 1%
+    matches server-team's safety bound (1% over 30d ≈ +9% annualized,
+    basically index-equivalent — sweep stops here at the latest, but
+    typically EV-positivity or label-coverage stops it sooner).
+    """
+    if endpoint_ratio < 0 or endpoint_ratio > 1:
+        raise ValueError(f"endpoint_ratio must be in [0, 1], got {endpoint_ratio}")
+    specs: list[SustainedWinnerSpec] = []
+    g_pct = g_max_pct
+    while g_pct >= g_min_pct - 1e-9:
+        # Format the name with the gain percent as a 2-digit integer
+        # e.g. g_pct=20.0 → "g20", g_pct=18.0 → "g18", g_pct=1.0 → "g01"
+        # This matches the platform-side pattern naming sw1_g{NN}_{rule_id}.
+        name = f"g{int(round(g_pct)):02d}"
+        specs.append(SustainedWinnerSpec(
+            name=name,
+            touch_threshold_pct=g_pct,
+            endpoint_threshold_pct=g_pct * endpoint_ratio,
+            horizon_days=horizon_days,
+            min_entry_price_usd=min_entry_price_usd,
+        ))
+        g_pct -= step_pct
+    return specs
 
 
 def compute_sustained_winner_label(
