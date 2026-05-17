@@ -350,6 +350,17 @@ def main(argv: list[str] | None = None) -> int:
     clusters_df.write_parquet(out_dir / "clusters.parquet")
     print(f"  wrote clusters.parquet ({clusters_df.height} clusters)")
 
+    # Persist the sample embeddings + (symbol, date) keys so the emit
+    # module can compute per-cluster radii without re-embedding the sample.
+    # Embeddings are (N, 768) float32 ≈ 90 MB at N=30K, 600 MB at N=200K —
+    # acceptable next to the 100 MB encoder weights.
+    np.savez_compressed(
+        out_dir / "sample_embeddings.npz",
+        embeddings=embs.astype(np.float32),
+        cluster_labels=cluster_labels.astype(np.int32),
+    )
+    print(f"  wrote sample_embeddings.npz ({embs.nbytes // (1024*1024)} MB raw)")
+
     # Cluster membership for the sample (sufficient for SIGNAL emit at this scale;
     # full-universe membership requires embedding all 1M rows)
     sample_symbols = np.array([
