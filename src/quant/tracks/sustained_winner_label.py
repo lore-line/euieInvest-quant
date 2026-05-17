@@ -45,12 +45,17 @@ class SustainedWinnerSpec:
         touch_threshold_pct = 20%, endpoint_threshold_pct = 10%
       strict:
         touch_threshold_pct = 20%, endpoint_threshold_pct = 20%
+
+    Horizon is **20 trading days** (NOT calendar days) per server-team
+    final spec lock (PR #1 issuecomment 2026-05-17 03:23). User's
+    original "30 days" was calendar — converted to ~21 trading days,
+    rounded to 20 for clean indexing.
     """
 
     name: str  # "standard" or "strict"
     touch_threshold_pct: float  # max-forward-return must exceed this
-    endpoint_threshold_pct: float  # day-30 close must exceed this above entry
-    horizon_days: int = 30
+    endpoint_threshold_pct: float  # day-N close must exceed this above entry
+    horizon_days: int = 20  # trading days (server-team spec lock)
     min_entry_price_usd: float = 1.00
 
     def label_column(self) -> str:
@@ -70,7 +75,7 @@ def sweep_specs(
     g_min_pct: float = 1.0,
     step_pct: float = 1.0,
     endpoint_ratio: float = 0.5,
-    horizon_days: int = 30,
+    horizon_days: int = 20,  # trading days per server-team final spec
     min_entry_price_usd: float = 1.00,
 ) -> list[SustainedWinnerSpec]:
     """Generate a list of specs for the Pareto-frontier gain sweep
