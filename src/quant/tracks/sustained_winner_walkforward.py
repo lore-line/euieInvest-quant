@@ -66,6 +66,11 @@ WINDOWS: list[tuple[date, date]] = [
 SURVIVOR_MIN_LIFT = 1.2
 SURVIVOR_MAX_LIFT_DECAY = 0.5
 
+# Convenience exports derived from WINDOWS, used by downstream modules
+# (joint_validate, embedding_clusters).
+TRADE_WINDOW_START = WINDOWS[0][0]   # 2024-01-01
+TRADE_WINDOW_END = WINDOWS[-1][1]    # 2026-03-30
+
 
 # -------------------- rule + feature prep --------------------
 
