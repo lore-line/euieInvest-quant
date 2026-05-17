@@ -56,6 +56,18 @@ DEFAULT_EXTRA_SLIPPAGE_RT = 0.0         # upgrade beyond baked-in (set 0.0005-0.
 # Server-team gate: net-Sharpe >= 0.8 to pass Stream 2 lifecycle stage 2 → 3
 GATE_MIN_NET_SHARPE = 0.8
 
+# small_cap_atr profile per server-team friction formula
+# (PR #1 issuecomment-4472873962):
+#   fee_per_leg_usd       = 0 (Wealthsimple ws_equity is commission-free)
+#   spread_per_leg_pct    = 0.0004 (0.04%)
+#   slippage_per_leg_usd  = atr × 0.18 (stops) or atr × 0.08 (market/TP)
+# Requires per-trade `entry_atr_pct_14` column on the signals frame
+# (joined upstream by phase_b_v3_liquidity_filter or equivalent).
+SMALL_CAP_ATR_FEE_PCT_PER_LEG = 0.0
+SMALL_CAP_ATR_SPREAD_PCT_PER_LEG = 0.0004
+SMALL_CAP_ATR_STOP_SLIP_FACTOR = 0.18
+SMALL_CAP_ATR_MARKET_SLIP_FACTOR = 0.08
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
@@ -83,6 +95,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--extra-slippage-pct-rt", type=float, default=DEFAULT_EXTRA_SLIPPAGE_RT,
         help=f"Additional round-trip slippage beyond baked-in. Default {DEFAULT_EXTRA_SLIPPAGE_RT:.4f}.",
+    )
+    p.add_argument(
+        "--profile", type=str, default="flat", choices=["flat", "small_cap_atr"],
+        help="Friction profile. 'flat' (default) uses the fee/spread/slip flag values "
+             "(mid-cap-class). 'small_cap_atr' uses the server-team ATR-scaled formula "
+             "(fee=0, spread=0.04%%/leg, slip=ATR×0.18 for stops / ×0.08 for TP). "
+             "small_cap_atr requires `entry_atr_pct_14` column on signals.parquet.",
     )
     return p.parse_args(argv)
 
@@ -165,29 +184,78 @@ def main(argv: list[str] | None = None) -> int:
         gross_pnl_pct=(pl.col("gross_exit_price") / pl.col("gross_entry_price") - 1.0) * 100.0,
     )
 
-    # Friction costs in PERCENT (of position notional)
-    fee_cost_pct = 2.0 * args.fee_pct_per_leg * 100.0       # round-trip
-    spread_cost_pct = args.spread_pct_rt * 100.0
-    slippage_cost_pct = (2.0 * args.baked_in_slippage + args.extra_slippage_pct_rt) * 100.0
-    total_friction_pct = fee_cost_pct + spread_cost_pct + slippage_cost_pct
+    if args.profile == "small_cap_atr":
+        # Per-trade ATR-scaled friction. Requires entry_atr_pct_14 column
+        # (joined upstream from features.parquet — see phase_b_v3_liquidity_filter).
+        if "entry_atr_pct_14" not in enriched.columns:
+            print(f"ERROR: --profile small_cap_atr requires 'entry_atr_pct_14' column on signals.parquet "
+                  f"(join upstream from features.parquet via phase_b_v3_liquidity_filter or equivalent)")
+            return 1
 
-    enriched = enriched.with_columns(
-        fee_cost_pct=pl.lit(fee_cost_pct),
-        spread_cost_pct=pl.lit(spread_cost_pct),
-        slippage_cost_pct=pl.lit(slippage_cost_pct),
-    ).with_columns(
-        net_pnl_pct=pl.col("gross_pnl_pct") - pl.col("fee_cost_pct")
-                    - pl.col("spread_cost_pct") - pl.col("slippage_cost_pct"),
-    ).with_columns(
-        friction_pct_of_gross=pl.when(pl.col("gross_pnl_pct").abs() > 0.01)
-        .then(total_friction_pct / pl.col("gross_pnl_pct").abs() * 100.0)
-        .otherwise(None),
-    )
+        # Fee: 0 for ws_equity
+        # Spread: 0.04% per leg = 0.08% RT
+        # Slippage: ATR × 0.18 per stop leg, × 0.08 per TP leg
+        # exit_reason values from paper_sleeve_simulate are 'stop', 'target', 'time', 'end_of_period'
+        # Treat 'stop' as stop-order slippage, everything else as market slippage.
+        fee_cost_pct_expr = pl.lit(2.0 * SMALL_CAP_ATR_FEE_PCT_PER_LEG * 100.0)
+        spread_cost_pct_expr = pl.lit(2.0 * SMALL_CAP_ATR_SPREAD_PCT_PER_LEG * 100.0)
+        # Per-leg slippage: entry is always market (entry_atr × market_slip),
+        # exit varies by reason (stop → stop_slip, else market_slip)
+        # entry_atr_pct_14 is in decimal (0.05 = 5% ATR/price)
+        slippage_cost_pct_expr = (
+            pl.col("entry_atr_pct_14") * 100.0 * (
+                pl.lit(SMALL_CAP_ATR_MARKET_SLIP_FACTOR)  # entry leg, always market
+                + pl.when(pl.col("exit_reason") == "stop")
+                .then(pl.lit(SMALL_CAP_ATR_STOP_SLIP_FACTOR))
+                .otherwise(pl.lit(SMALL_CAP_ATR_MARKET_SLIP_FACTOR))  # exit leg
+            )
+        )
+        enriched = enriched.with_columns(
+            fee_cost_pct=fee_cost_pct_expr,
+            spread_cost_pct=spread_cost_pct_expr,
+            slippage_cost_pct=slippage_cost_pct_expr,
+        )
+        # Total per-trade friction varies; can't precompute a single constant
+        enriched = enriched.with_columns(
+            total_friction_pct_per_trade=pl.col("fee_cost_pct") + pl.col("spread_cost_pct") + pl.col("slippage_cost_pct"),
+        ).with_columns(
+            net_pnl_pct=pl.col("gross_pnl_pct") - pl.col("total_friction_pct_per_trade"),
+            friction_pct_of_gross=pl.when(pl.col("gross_pnl_pct").abs() > 0.01)
+            .then(pl.col("total_friction_pct_per_trade") / pl.col("gross_pnl_pct").abs() * 100.0)
+            .otherwise(None),
+        )
+        # For reporting consistency, compute mean per-trade friction
+        fee_cost_pct = float(enriched["fee_cost_pct"].mean())
+        spread_cost_pct = float(enriched["spread_cost_pct"].mean())
+        slippage_cost_pct = float(enriched["slippage_cost_pct"].mean())
+        total_friction_pct = fee_cost_pct + spread_cost_pct + slippage_cost_pct
+    else:
+        # 'flat' profile (default, mid-cap-class)
+        fee_cost_pct = 2.0 * args.fee_pct_per_leg * 100.0       # round-trip
+        spread_cost_pct = args.spread_pct_rt * 100.0
+        slippage_cost_pct = (2.0 * args.baked_in_slippage + args.extra_slippage_pct_rt) * 100.0
+        total_friction_pct = fee_cost_pct + spread_cost_pct + slippage_cost_pct
+
+        enriched = enriched.with_columns(
+            fee_cost_pct=pl.lit(fee_cost_pct),
+            spread_cost_pct=pl.lit(spread_cost_pct),
+            slippage_cost_pct=pl.lit(slippage_cost_pct),
+        ).with_columns(
+            net_pnl_pct=pl.col("gross_pnl_pct") - pl.col("fee_cost_pct")
+                        - pl.col("spread_cost_pct") - pl.col("slippage_cost_pct"),
+        ).with_columns(
+            friction_pct_of_gross=pl.when(pl.col("gross_pnl_pct").abs() > 0.01)
+            .then(total_friction_pct / pl.col("gross_pnl_pct").abs() * 100.0)
+            .otherwise(None),
+        )
 
     # Also compute net USD pnl (recompute from net_pnl_pct × position_size_usd)
+    # total_friction_usd uses per-trade friction sum (works for both flat + ATR profiles)
     enriched = enriched.with_columns(
         net_pnl_usd=pl.col("net_pnl_pct") / 100.0 * pl.col("position_size_usd"),
-        total_friction_usd=pl.lit(total_friction_pct) / 100.0 * pl.col("position_size_usd"),
+        total_friction_usd=(
+            pl.col("fee_cost_pct") + pl.col("spread_cost_pct") + pl.col("slippage_cost_pct")
+        ) / 100.0 * pl.col("position_size_usd"),
     )
 
     # Hold trading days (date diff). entered_at/exited_at are ISO datetime
@@ -260,14 +328,17 @@ def main(argv: list[str] | None = None) -> int:
         "pipeline_step": PIPELINE_STEP,
         "signals_path": str(signals_path),
         "config": {
-            "fee_pct_per_leg": args.fee_pct_per_leg,
-            "spread_pct_rt": args.spread_pct_rt,
-            "baked_in_slippage_per_leg": args.baked_in_slippage,
-            "extra_slippage_pct_rt": args.extra_slippage_pct_rt,
-            "fee_cost_pct_round_trip": fee_cost_pct,
-            "spread_cost_pct_round_trip": spread_cost_pct,
-            "slippage_cost_pct_round_trip": slippage_cost_pct,
-            "total_friction_pct_round_trip": total_friction_pct,
+            "profile": args.profile,
+            "fee_pct_per_leg": args.fee_pct_per_leg if args.profile == "flat" else SMALL_CAP_ATR_FEE_PCT_PER_LEG,
+            "spread_pct_rt": args.spread_pct_rt if args.profile == "flat" else (2.0 * SMALL_CAP_ATR_SPREAD_PCT_PER_LEG),
+            "baked_in_slippage_per_leg": args.baked_in_slippage if args.profile == "flat" else None,
+            "extra_slippage_pct_rt": args.extra_slippage_pct_rt if args.profile == "flat" else None,
+            "atr_stop_slip_factor": SMALL_CAP_ATR_STOP_SLIP_FACTOR if args.profile == "small_cap_atr" else None,
+            "atr_market_slip_factor": SMALL_CAP_ATR_MARKET_SLIP_FACTOR if args.profile == "small_cap_atr" else None,
+            "fee_cost_pct_round_trip_mean": fee_cost_pct,
+            "spread_cost_pct_round_trip_mean": spread_cost_pct,
+            "slippage_cost_pct_round_trip_mean": slippage_cost_pct,
+            "total_friction_pct_round_trip_mean": total_friction_pct,
         },
         "n_trades": int(n_trades),
         "mean_hold_days": mean_hold,
