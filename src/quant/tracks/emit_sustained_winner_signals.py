@@ -53,6 +53,10 @@ PIPELINE_STEP = "sustained_winner_signal_emission_v1"
 DEFAULT_DEDUP_WINDOW_DAYS = 30
 DEFAULT_SPEC = "g06"  # Pareto pick from sweep
 DEFAULT_STRENGTH_DIVISOR = 10.0  # signal_strength = min(1.0, ev_per_trade_pct / 10.0)
+DEFAULT_EXPECTED_RETURN_CAP_PCT = 30.0  # per server-team direction (PR #1 issuecomment-4469414710):
+# "cap the field at the realistic upper bound (probably 30%? 50%?) — defensive
+# against any rule with an outlier mean_endpoint that would mislead the prompt
+# into 'wow, 80% expected return' framing."
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -84,6 +88,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--strength-divisor", type=float, default=DEFAULT_STRENGTH_DIVISOR,
         help=f"signal_strength = min(1.0, ev_per_trade_pct / X). Default {DEFAULT_STRENGTH_DIVISOR}.",
+    )
+    p.add_argument(
+        "--expected-return-cap-pct", type=float, default=DEFAULT_EXPECTED_RETURN_CAP_PCT,
+        help=f"Defensive cap on per-rule expected_return_pct to prevent outlier framing. "
+             f"Default {DEFAULT_EXPECTED_RETURN_CAP_PCT}.",
     )
     p.add_argument(
         "--out-dir", type=Path, default=None,
@@ -225,6 +234,7 @@ def _build_signal_rows(
     strength_divisor: float,
     run_id: str,
     emission_dates: set[date],
+    expected_return_cap_pct: float = DEFAULT_EXPECTED_RETURN_CAP_PCT,
 ) -> pl.DataFrame:
     """Convert deduped (symbol, date, rule_key) into contract-schema rows."""
     if deduped.height == 0:
@@ -247,6 +257,10 @@ def _build_signal_rows(
         # Conditions are threaded in via metrics["_conditions_dicts"]
         # (enriched from rules.parquet at load time in main()).
         conds_dicts = m.get("_conditions_dicts", [])
+        # Defensive cap on expected_return_pct per server-team direction —
+        # protects Claude's prompt from outlier framing ("80% expected!")
+        raw_expected = float(m["mean_endpoint_pct"])
+        capped_expected = min(raw_expected, expected_return_cap_pct)
         rows.append({
             "signal_id": f"{run_id}_{symbol}_{dt.isoformat()}_ENTRY_{pattern}",
             "symbol": symbol,
@@ -255,7 +269,7 @@ def _build_signal_rows(
             "signal_strength": strength,
             "pattern": pattern,
             "expected_horizon_days": int(horizon_days),
-            "expected_return_pct": round(float(m["mean_endpoint_pct"]), 2),
+            "expected_return_pct": round(capped_expected, 2),
             "conditions_json": json.dumps(conds_dicts),
         })
     return pl.DataFrame(rows, schema=_CONTRACT_SCHEMA)
@@ -366,6 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     # Build contract rows
     signals_df = _build_signal_rows(
         deduped, metrics, spec_name, horizon, args.strength_divisor, run_id, emission_dates,
+        expected_return_cap_pct=args.expected_return_cap_pct,
     )
     print(f"  contract rows: {signals_df.height:,}")
 
@@ -392,6 +407,38 @@ def main(argv: list[str] | None = None) -> int:
     signals_df.write_parquet(parquet_path)
     print(f"  wrote {parquet_path}")
 
+    # Load training metadata for the manifest `notes` field — server team
+    # asked us to flag the val_auc so Claude's prompt-side weights signals
+    # appropriately (PR #1 issuecomment-4469414710).
+    training_meta: dict = {}
+    spec_training_manifest = spec_dir / "manifest.json"
+    if spec_training_manifest.exists():
+        try:
+            with open(spec_training_manifest) as f:
+                training_meta = json.load(f).get("training", {})
+        except Exception:
+            training_meta = {}
+    val_auc = training_meta.get("val_auc")
+    n_raw_above_cap = int(
+        sum(1 for m in metrics.values()
+            if float(m.get("mean_endpoint_pct", 0)) > args.expected_return_cap_pct)
+    )
+    notes_lines = []
+    if val_auc is not None:
+        notes_lines.append(
+            f"val_auc={val_auc:.4f} — model discrimination is "
+            f"{'weak' if val_auc < 0.60 else 'moderate' if val_auc < 0.70 else 'strong'}; "
+            f"the positive EV here comes from the underlying winner distribution's "
+            f"positive skew, not from strong model-predictive power. Weight "
+            f"sw1_{spec_name}_* patterns accordingly in the prompt."
+        )
+    if n_raw_above_cap > 0:
+        notes_lines.append(
+            f"{n_raw_above_cap} rule(s) had raw mean_endpoint_pct above the "
+            f"{args.expected_return_cap_pct}% cap; expected_return_pct capped for "
+            f"those signals (defensive against outlier framing)."
+        )
+
     manifest = {
         "run_id": run_id,
         "pipeline_step": PIPELINE_STEP,
@@ -414,6 +461,16 @@ def main(argv: list[str] | None = None) -> int:
         "n_unique_symbols": int(signals_df["symbol"].n_unique()) if signals_df.height else 0,
         "n_unique_patterns": int(signals_df["pattern"].n_unique()) if signals_df.height else 0,
         "strength_divisor": args.strength_divisor,
+        "expected_return_cap_pct": args.expected_return_cap_pct,
+        "n_rules_above_return_cap": n_raw_above_cap,
+        "training_metadata": {
+            "val_auc": val_auc,
+            "train_auc": training_meta.get("train_auc"),
+            "n_train_rows": training_meta.get("n_train_rows"),
+            "n_val_rows": training_meta.get("n_val_rows"),
+            "n_features": training_meta.get("n_features"),
+        },
+        "notes": notes_lines,
         "spec_dir": str(spec_dir),
         "wall_clock_s": round(time.perf_counter() - t0, 3),
     }

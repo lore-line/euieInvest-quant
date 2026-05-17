@@ -51,7 +51,16 @@
 param(
     [switch]$DryRun,
     [switch]$NoPush,
-    [string]$ReportsRepo = 'D:\Nextcloud\LORELINE\CODE\euieInvest-reports'
+    [string]$ReportsRepo = 'D:\Nextcloud\LORELINE\CODE\euieInvest-reports',
+    # Skip the sustained_winner_g06 emit (Phase B addition per PR #1
+    # issuecomment-4469414710). Default behavior is to emit BOTH Phase A
+    # and sustained_winner_g06 in sequence.
+    [switch]$NoSustainedWinner,
+    # Suffix used for the sustained_winner run dir.  Resulting name is
+    # `{phase-a-NNN}-{Suffix}/` — server-team spec
+    # (issuecomment-4469414710 Q2).
+    [string]$SustainedWinnerSpec = 'g06',
+    [int]$SustainedWinnerBackfillDays = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,7 +124,7 @@ try {
         }
     }
 
-    # Step 2: find the newly-created run dir. It's the most recent
+    # Step 2: find the newly-created Phase A run dir. It's the most recent
     # YYYY-MM-DD-NNN/ pattern dir in $QuantRunsDir matching today's
     # signal_date (which equals features.parquet's max date, NOT today UTC
     # necessarily — features.parquet usually lags by 0-4 days).
@@ -126,39 +135,113 @@ try {
         throw "no runs/{date}-NNN/ dir found in $QuantRunsDir after emit"
     }
     $latestRun = $runDirs[0]
-    Write-Log "latest run dir: $($latestRun.Name)"
+    Write-Log "latest Phase A run dir: $($latestRun.Name)"
 
-    # Step 3: copy artifacts to reports repo. Path matches quant signal
-    # contract v1 spec: `euieInvest-reports/runs/{YYYY-MM-DD-NNN}/`.
-    $reportsRunDir = Join-Path $ReportsRepo "runs\$($latestRun.Name)"
-    if ($DryRun) {
-        Write-Log "DRY RUN — would copy $($latestRun.FullName)\{manifest.json,quant_signal_events.parquet} to $reportsRunDir"
+    # Step 2.5: sustained_winner_g06 emit (Phase B addition per server-team
+    # direction PR #1 issuecomment-4469414710 Q2). Publishes alongside
+    # Phase A under `runs/{phase-a-NNN}-sustained_winner_{spec}/`. The
+    # platform-side ingest deduplicates on signal_id and ingests both
+    # under separate ml_runs rows (idempotent FK lineage).
+    $sustainedSuffix = "sustained_winner_$SustainedWinnerSpec"
+    $sustainedRunName = "$($latestRun.Name)-$sustainedSuffix"
+    $sustainedRunDir = Join-Path $QuantRunsDir $sustainedRunName
+
+    if ($NoSustainedWinner) {
+        Write-Log "skipping sustained_winner emit per -NoSustainedWinner"
     } else {
-        New-Item -ItemType Directory -Path $reportsRunDir -Force | Out-Null
-        Copy-Item -Path (Join-Path $latestRun.FullName 'manifest.json') -Destination $reportsRunDir -Force
-        Copy-Item -Path (Join-Path $latestRun.FullName 'quant_signal_events.parquet') -Destination $reportsRunDir -Force
-        Write-Log "copied manifest + parquet to $reportsRunDir"
+        $sustainedArgs = @(
+            'run', '--rm',
+            '-v', "${RepoRoot}:/workspace",
+            '-v', "${QuantRunsDir}:/workspace/runs",
+            '-w', '/workspace',
+            $imageName,
+            'python', '-m', 'quant.tracks.emit_sustained_winner_signals',
+            '--spec', $SustainedWinnerSpec,
+            '--backfill-days', "$SustainedWinnerBackfillDays",
+            '--out-dir', "/workspace/runs/$sustainedRunName"
+        )
+        if ($DryRun) {
+            Write-Log "DRY RUN — would run: docker $($sustainedArgs -join ' ')"
+        } else {
+            Write-Log "running sustained_winner_$SustainedWinnerSpec emit ..."
+            $sustainedOutput = & docker @sustainedArgs 2>&1
+            $sustainedExit = $LASTEXITCODE
+            $sustainedOutput | ForEach-Object { Write-Log $_ }
+            if ($sustainedExit -ne 0) {
+                # Don't fail the whole run if sustained_winner crashes —
+                # Phase A signals are still valid and should ship. Just
+                # warn and skip the sustained_winner copy/commit.
+                Write-Log "sustained_winner emit exited $sustainedExit — Phase A signals still proceed" 'WARN'
+                $NoSustainedWinner = $true
+            } elseif (-not (Test-Path $sustainedRunDir)) {
+                Write-Log "sustained_winner emit succeeded but $sustainedRunDir not found — skipping copy" 'WARN'
+                $NoSustainedWinner = $true
+            } else {
+                Write-Log "sustained_winner run dir: $sustainedRunName"
+            }
+        }
     }
 
-    # Step 4: commit + push reports repo.
+    # Step 3: copy artifacts to reports repo. Each emit run gets its own
+    # directory matching quant signal contract v1 spec:
+    # `euieInvest-reports/runs/{YYYY-MM-DD-NNN}/` for Phase A and
+    # `euieInvest-reports/runs/{YYYY-MM-DD-NNN}-sustained_winner_g06/` for the
+    # Phase B addition.
+    $reportsRunDirPhaseA = Join-Path $ReportsRepo "runs\$($latestRun.Name)"
+    $reportsRunDirSustained = Join-Path $ReportsRepo "runs\$sustainedRunName"
+    $copiedDirs = @()
     if ($DryRun) {
-        Write-Log "DRY RUN — would commit + push reports repo"
+        Write-Log "DRY RUN — would copy $($latestRun.FullName)\{manifest.json,quant_signal_events.parquet} to $reportsRunDirPhaseA"
+        if (-not $NoSustainedWinner) {
+            Write-Log "DRY RUN — would copy $sustainedRunDir\{manifest.json,quant_signal_events.parquet} to $reportsRunDirSustained"
+        }
+    } else {
+        New-Item -ItemType Directory -Path $reportsRunDirPhaseA -Force | Out-Null
+        Copy-Item -Path (Join-Path $latestRun.FullName 'manifest.json') -Destination $reportsRunDirPhaseA -Force
+        Copy-Item -Path (Join-Path $latestRun.FullName 'quant_signal_events.parquet') -Destination $reportsRunDirPhaseA -Force
+        Write-Log "copied Phase A manifest + parquet to $reportsRunDirPhaseA"
+        $copiedDirs += @{ name = $latestRun.Name; reports_dir = $reportsRunDirPhaseA; kind = 'phase_a' }
+        if (-not $NoSustainedWinner -and (Test-Path $sustainedRunDir)) {
+            New-Item -ItemType Directory -Path $reportsRunDirSustained -Force | Out-Null
+            Copy-Item -Path (Join-Path $sustainedRunDir 'manifest.json') -Destination $reportsRunDirSustained -Force
+            Copy-Item -Path (Join-Path $sustainedRunDir 'quant_signal_events.parquet') -Destination $reportsRunDirSustained -Force
+            Write-Log "copied sustained_winner_$SustainedWinnerSpec manifest + parquet to $reportsRunDirSustained"
+            $copiedDirs += @{ name = $sustainedRunName; reports_dir = $reportsRunDirSustained; kind = 'sustained_winner' }
+        }
+    }
+
+    # Step 4: commit + push reports repo with both runs in one commit.
+    if ($DryRun) {
+        Write-Log "DRY RUN — would commit + push reports repo (both Phase A and sustained_winner)"
     } else {
         Push-Location $ReportsRepo
         try {
-            $manifestJson = Get-Content (Join-Path $reportsRunDir 'manifest.json') -Raw | ConvertFrom-Json
-            $n = $manifestJson.n_signals_emitted
+            $manifestPhaseA = Get-Content (Join-Path $reportsRunDirPhaseA 'manifest.json') -Raw | ConvertFrom-Json
+            $nPhaseA = $manifestPhaseA.n_signals_emitted
+            $signalDate = $manifestPhaseA.signal_date
+            $gitCommit = $manifestPhaseA.git_commit_of_quant_repo
+
+            $msgParts = @("run: $($latestRun.Name) quant_signal_emission v1 daily — Phase A $nPhaseA signals")
+            $addPaths = @("runs/$($latestRun.Name)/")
+            if (-not $NoSustainedWinner -and (Test-Path $reportsRunDirSustained)) {
+                $manifestSustained = Get-Content (Join-Path $reportsRunDirSustained 'manifest.json') -Raw | ConvertFrom-Json
+                $nSustained = $manifestSustained.n_signals_emitted
+                $msgParts[0] = "run: $($latestRun.Name) quant_signal_emission v1 daily — Phase A $nPhaseA + sustained_winner_$SustainedWinnerSpec $nSustained signals"
+                $addPaths += "runs/$sustainedRunName/"
+            }
             $commitMsg = @"
-run: $($latestRun.Name) quant_signal_emission v1 daily — $n signals
+$($msgParts[0])
 
 Auto-emitted by scripts/ops/quant-emit-signals.ps1 daily cron.
-signal_date=$($manifestJson.signal_date), backfill_days=$($manifestJson.backfill_days),
-git_commit_of_quant_repo=$($manifestJson.git_commit_of_quant_repo).
+signal_date=$signalDate, backfill_days=$($manifestPhaseA.backfill_days),
+git_commit_of_quant_repo=$gitCommit.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 "@
-            & git add "runs/$($latestRun.Name)/" 2>&1 | ForEach-Object { Write-Log $_ }
-            if ($LASTEXITCODE -ne 0) { throw "git add failed (exit $LASTEXITCODE)" }
+            foreach ($p in $addPaths) {
+                & git add $p 2>&1 | ForEach-Object { Write-Log $_ }
+                if ($LASTEXITCODE -ne 0) { throw "git add $p failed (exit $LASTEXITCODE)" }
+            }
             & git commit -m $commitMsg 2>&1 | ForEach-Object { Write-Log $_ }
             if ($LASTEXITCODE -ne 0) {
                 # Empty commit (no changes) is fine — could happen if
