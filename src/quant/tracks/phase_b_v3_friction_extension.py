@@ -31,7 +31,7 @@ Default friction values (Kraken-Pro equivalent per server-team spec):
 
 Output to the SAME run dir:
   - signals_with_friction.parquet — per-trade enrichment
-  - friction_summary.json — aggregate net metrics + gate status
+  - friction_breakdown.json — aggregate net metrics + gate status
 """
 from __future__ import annotations
 
@@ -298,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "wall_clock_s": round(time.perf_counter() - t0, 2),
     }
-    summary_path = out_dir / "friction_summary.json"
+    summary_path = out_dir / "friction_breakdown.json"
     summary_path.write_text(json.dumps(summary, indent=2))
     print(f"  wrote {summary_path}")
 
