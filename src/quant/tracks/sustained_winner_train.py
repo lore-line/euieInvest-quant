@@ -41,6 +41,7 @@ import numpy as np
 import polars as pl
 import xgboost as xgb
 
+from quant.tracks import make_run_id
 from quant.tracks.sustained_winner_label import (
     SPECS,
     SustainedWinnerSpec,
@@ -54,6 +55,7 @@ from quant.tracks.xgb_rule_extraction import (
     _evaluate_rules,
     extract_paths,
 )
+from quant.train import RunStatus
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -279,117 +281,143 @@ def main(argv: list[str] | None = None) -> int:
     features = pl.read_parquet(features_path)
     print(f"  loaded {features.height:,} rows × {features.width} cols")
 
-    # Compute label
-    t_label = time.perf_counter()
-    labeled = compute_sustained_winner_label(features, spec)
-    stats = label_statistics(labeled, spec)
-    print(f"  labelable: {stats['n_labelable_rows']:,}, "
-          f"winners: {stats['n_winners']:,} ({stats['winner_rate']*100:.2f}%)  "
-          f"({time.perf_counter() - t_label:.1f}s)")
-
-    # Resolve output dir
+    # Resolve output dir — FLAT single-level so quant-status sees it.
+    # Naming: runs/{date}-sustained_winner_v1_{spec.name} e.g. 2026-05-17-sustained_winner_v1_g20
+    run_date_str = date.today().isoformat()
+    short_step = f"sustained_winner_v1_{spec.name}"
     if args.out_root is not None:
-        out_root = _resolve_path(args.out_root)
+        out_dir = _resolve_path(args.out_root) / f"{run_date_str}-{short_step}"
     else:
-        out_root = _REPO_ROOT / f"runs/{date.today().isoformat()}-sustained_winner_v1_sweep"
-    out_dir = out_root / spec.label_column()
+        out_dir = _REPO_ROOT / f"runs/{run_date_str}-{short_step}"
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"  out_dir: {out_dir.relative_to(_REPO_ROOT)}")
 
-    # Prepare training matrix
-    train_df, val_df, feature_cols = _prepare_training_matrix(
-        labeled, spec, args.train_cutoff
+    # Status tracking — 3 lifecycle epochs: label, train, rule-extract.
+    # This is what quant-status reads at depth-1 to surface the run.
+    status = RunStatus(
+        dir=out_dir,
+        run_id=make_run_id(run_date_str, PIPELINE_STEP),
+        pipeline_step=PIPELINE_STEP,
+        epoch_total=3,
     )
-    n_train_pos = int(train_df.filter(pl.col(spec.label_column()) == True).height)
-    print(f"  train: {train_df.height:,} rows ({n_train_pos:,} positive) | val: {val_df.height:,}")
-    if n_train_pos < args.min_train_cohort:
-        msg = f"train cohort {n_train_pos:,} < MIN_TRAIN_COHORT={args.min_train_cohort:,} — SKIP {spec.label_column()}"
-        print(f"  {msg}")
-        # Still write a manifest documenting the skip
+    status.update(state="training", epoch_current=0)
+
+    try:
+        # Compute label
+        t_label = time.perf_counter()
+        labeled = compute_sustained_winner_label(features, spec)
+        stats = label_statistics(labeled, spec)
+        print(f"  labelable: {stats['n_labelable_rows']:,}, "
+              f"winners: {stats['n_winners']:,} ({stats['winner_rate']*100:.2f}%)  "
+              f"({time.perf_counter() - t_label:.1f}s)")
+        status.mark_epoch_complete()
+        status.record_checkpoint(epoch=1)
+        status.update(state="training", epoch_current=1)
+
+        # Prepare training matrix
+        train_df, val_df, feature_cols = _prepare_training_matrix(
+            labeled, spec, args.train_cutoff
+        )
+        n_train_pos = int(train_df.filter(pl.col(spec.label_column()) == True).height)
+        print(f"  train: {train_df.height:,} rows ({n_train_pos:,} positive) | val: {val_df.height:,}")
+        if n_train_pos < args.min_train_cohort:
+            msg = f"train cohort {n_train_pos:,} < MIN_TRAIN_COHORT={args.min_train_cohort:,} — SKIP {spec.label_column()}"
+            print(f"  {msg}")
+            # Still write a manifest documenting the skip
+            manifest = {
+                "spec": dataclasses.asdict(spec),
+                "pipeline_step": PIPELINE_STEP,
+                "skipped": True,
+                "skip_reason": msg,
+                "n_train_positives": n_train_pos,
+                "wall_clock_s": round(time.perf_counter() - t0, 3),
+            }
+            (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+            status.update(state="done", epoch_current=3, extras={"skipped": True, "skip_reason": msg})
+            return 0
+
+        # Train XGB
+        print(f"  training XGB ({args.n_rounds} rounds) ...")
+        t_train = time.perf_counter()
+        booster, training_metrics = _train_xgb(
+            train_df, val_df, feature_cols, spec.label_column(), args.n_rounds
+        )
+        print(f"  train_auc={training_metrics['train_auc']:.4f}  "
+              f"val_auc={training_metrics['val_auc']:.4f}  "
+              f"({time.perf_counter() - t_train:.1f}s)")
+        booster.save_model(str(out_dir / "xgb_model.json"))
+        status.mark_epoch_complete()
+        status.record_checkpoint(epoch=2)
+        status.update(state="training", epoch_current=2)
+
+        # Extract + filter rules. Evaluate on val_df (post-train-cutoff) per
+        # Phase B v3 convention — picks rules with out-of-train lift, and the
+        # subsequent walk-forward validation re-evaluates on 11 separate windows.
+        # val_df is smaller (~640K) than train (~1.7M) so the cached-mask memory
+        # footprint is manageable.
+        print(f"  extracting + filtering rules on val ({val_df.height:,} rows) ...")
+        t_rules = time.perf_counter()
+        rules_df = _extract_and_filter_rules(
+            booster, feature_cols, val_df, spec.label_column(),
+            args.rule_min_lift, args.rule_min_coverage_pct, args.rule_min_precision,
+        )
+        print(f"  rules: {rules_df.height:,} surviving filter  "
+              f"(min_lift={args.rule_min_lift}, min_cov_pct={args.rule_min_coverage_pct}, "
+              f"min_precision={args.rule_min_precision})  ({time.perf_counter() - t_rules:.1f}s)")
+        rules_df.write_parquet(out_dir / "rules.parquet")
+        status.mark_epoch_complete()
+        status.record_checkpoint(epoch=3)
+
+    # Manifest
         manifest = {
             "spec": dataclasses.asdict(spec),
             "pipeline_step": PIPELINE_STEP,
-            "skipped": True,
-            "skip_reason": msg,
-            "n_train_positives": n_train_pos,
+            "skipped": False,
+            "label_statistics": stats,
+            "training": training_metrics,
+            "rule_filter_thresholds": {
+                "min_lift": args.rule_min_lift,
+                "min_coverage_pct": args.rule_min_coverage_pct,
+                "min_precision": args.rule_min_precision,
+            },
+            "n_rules_surviving_filter": int(rules_df.height),
+            "rules_distribution": {
+                "lift_quartiles": [
+                    float(rules_df["lift"].quantile(q)) if rules_df.height else 0.0
+                    for q in [0.25, 0.50, 0.75]
+                ] if rules_df.height else [],
+                "precision_quartiles": [
+                    float(rules_df["precision"].quantile(q)) if rules_df.height else 0.0
+                    for q in [0.25, 0.50, 0.75]
+                ] if rules_df.height else [],
+                "coverage_n_quartiles": [
+                    int(rules_df["coverage_n"].quantile(q)) if rules_df.height else 0
+                    for q in [0.25, 0.50, 0.75]
+                ] if rules_df.height else [],
+            },
+            "features_path": str(features_path.relative_to(_REPO_ROOT)),
+            "features_sha256": f"sha256:{_file_sha256(features_path)}",
+            "train_cutoff": args.train_cutoff.isoformat(),
+            "git_commit_of_quant_repo": _git_head_sha(),
             "wall_clock_s": round(time.perf_counter() - t0, 3),
         }
         (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+        print(f"\n=== TRAINING RESULT for {spec.label_column()} ===")
+        print(f"  spec:               touch={spec.touch_threshold_pct}% endpoint={spec.endpoint_threshold_pct}% horizon={spec.horizon_days}td")
+        print(f"  positives in train: {n_train_pos:,}")
+        print(f"  XGB val AUC:        {training_metrics['val_auc']:.4f}")
+        print(f"  rules surviving:    {rules_df.height}")
+        if rules_df.height:
+            print(f"  lift distribution:  {rules_df['lift'].quantile(0.25):.2f} / "
+                  f"{rules_df['lift'].quantile(0.50):.2f} / "
+                  f"{rules_df['lift'].quantile(0.75):.2f}")
+            print(f"  coverage_n median:  {int(rules_df['coverage_n'].quantile(0.50)):,}")
+        print(f"  wall clock:         {time.perf_counter() - t0:.1f}s")
+        status.update(state="done", epoch_current=3)
         return 0
-
-    # Train XGB
-    print(f"  training XGB ({args.n_rounds} rounds) ...")
-    t_train = time.perf_counter()
-    booster, training_metrics = _train_xgb(
-        train_df, val_df, feature_cols, spec.label_column(), args.n_rounds
-    )
-    print(f"  train_auc={training_metrics['train_auc']:.4f}  "
-          f"val_auc={training_metrics['val_auc']:.4f}  "
-          f"({time.perf_counter() - t_train:.1f}s)")
-    booster.save_model(str(out_dir / "xgb_model.json"))
-
-    # Extract + filter rules. Evaluate on val_df (post-train-cutoff) per
-    # Phase B v3 convention — picks rules with out-of-train lift, and the
-    # subsequent walk-forward validation re-evaluates on 11 separate windows.
-    # val_df is smaller (~640K) than train (~1.7M) so the cached-mask memory
-    # footprint is manageable.
-    print(f"  extracting + filtering rules on val ({val_df.height:,} rows) ...")
-    t_rules = time.perf_counter()
-    rules_df = _extract_and_filter_rules(
-        booster, feature_cols, val_df, spec.label_column(),
-        args.rule_min_lift, args.rule_min_coverage_pct, args.rule_min_precision,
-    )
-    print(f"  rules: {rules_df.height:,} surviving filter  "
-          f"(min_lift={args.rule_min_lift}, min_cov_pct={args.rule_min_coverage_pct}, "
-          f"min_precision={args.rule_min_precision})  ({time.perf_counter() - t_rules:.1f}s)")
-    rules_df.write_parquet(out_dir / "rules.parquet")
-
-    # Manifest
-    manifest = {
-        "spec": dataclasses.asdict(spec),
-        "pipeline_step": PIPELINE_STEP,
-        "skipped": False,
-        "label_statistics": stats,
-        "training": training_metrics,
-        "rule_filter_thresholds": {
-            "min_lift": args.rule_min_lift,
-            "min_coverage_pct": args.rule_min_coverage_pct,
-            "min_precision": args.rule_min_precision,
-        },
-        "n_rules_surviving_filter": int(rules_df.height),
-        "rules_distribution": {
-            "lift_quartiles": [
-                float(rules_df["lift"].quantile(q)) if rules_df.height else 0.0
-                for q in [0.25, 0.50, 0.75]
-            ] if rules_df.height else [],
-            "precision_quartiles": [
-                float(rules_df["precision"].quantile(q)) if rules_df.height else 0.0
-                for q in [0.25, 0.50, 0.75]
-            ] if rules_df.height else [],
-            "coverage_n_quartiles": [
-                int(rules_df["coverage_n"].quantile(q)) if rules_df.height else 0
-                for q in [0.25, 0.50, 0.75]
-            ] if rules_df.height else [],
-        },
-        "features_path": str(features_path.relative_to(_REPO_ROOT)),
-        "features_sha256": f"sha256:{_file_sha256(features_path)}",
-        "train_cutoff": args.train_cutoff.isoformat(),
-        "git_commit_of_quant_repo": _git_head_sha(),
-        "wall_clock_s": round(time.perf_counter() - t0, 3),
-    }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
-    print(f"\n=== TRAINING RESULT for {spec.label_column()} ===")
-    print(f"  spec:               touch={spec.touch_threshold_pct}% endpoint={spec.endpoint_threshold_pct}% horizon={spec.horizon_days}td")
-    print(f"  positives in train: {n_train_pos:,}")
-    print(f"  XGB val AUC:        {training_metrics['val_auc']:.4f}")
-    print(f"  rules surviving:    {rules_df.height}")
-    if rules_df.height:
-        print(f"  lift distribution:  {rules_df['lift'].quantile(0.25):.2f} / "
-              f"{rules_df['lift'].quantile(0.50):.2f} / "
-              f"{rules_df['lift'].quantile(0.75):.2f}")
-        print(f"  coverage_n median:  {int(rules_df['coverage_n'].quantile(0.50)):,}")
-    print(f"  wall clock:         {time.perf_counter() - t0:.1f}s")
-    return 0
+    except Exception as exc:
+        status.update(state="failed", epoch_current=0, error=f"{type(exc).__name__}: {exc}")
+        raise
 
 
 if __name__ == "__main__":
