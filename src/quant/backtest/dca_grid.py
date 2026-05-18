@@ -147,16 +147,17 @@ VERSION_CONFIG = {
         "require_fresh_flip": False,   # 3% doesn't need fresh flip
     },
     # --- Phase 2b extensions (extrapolated from v1/v2/v3 patterns) ---
-    # v0.5: tighter scalper for low-vol regimes BELOW v1's gate.
+    # v0.5: tighter scalper, fires on any ATR ≥ 0.5% (overlaps v1+ regimes).
     # v4 / v5: extreme-vol scalpers ABOVE v3's gate.
-    # Non-overlapping ATR bands: v0.5 ∈ [0.5,1), v1 ∈ [1,2), v2 ∈ [2,4),
-    # v3 ∈ [4,8), v4 ≥ 8, v5 ≥ 10 (slower TF differentiates from v4).
+    # v0.5 deliberately UNBOUNDED on upper ATR — per user direction, v0.5
+    # is a "tight-TP harvester across all ATR regimes", not a low-vol-only
+    # version. Overlapping with v1/v2/... regimes is the design.
     0.5: {
         "tp_pct": 0.005,
         "sl_pct": 0.0025,
         "native_tf_min": 1,            # 1m — finer timing for tight TP
         "atr_pct_min": 0.5,
-        "atr_pct_max": 1.0,            # bounded so v0.5 strictly catches low-vol regime
+        "atr_pct_max": None,           # fires on any ATR ≥ 0.5%, including v1's regime
         "inner_ema": 75,
         "inner_atr": 14,
         "inner_atr_mult": 0.5,
