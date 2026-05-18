@@ -1,0 +1,177 @@
+{
+  "window": [
+    "2022-09-15",
+    "2026-05-17"
+  ],
+  "starting_capital": 3000.0,
+  "universe": [
+    "BTC-USD",
+    "ETH-USD",
+    "SOL-USD",
+    "ADA-USD",
+    "AVAX-USD",
+    "DOT-USD",
+    "LINK-USD",
+    "ATOM-USD",
+    "RUNE-USD",
+    "FET-USD"
+  ],
+  "versions": [
+    1,
+    2,
+    3
+  ],
+  "fixed_friction_vol_30d": 500000.0,
+  "signal_counts_by_version": {
+    "1": 16228,
+    "2": 1041,
+    "3": 50
+  },
+  "cells": [
+    {
+      "base_pct": 0.0005,
+      "cagr_pct": 3.7917331516100106,
+      "final_equity": 3438.8870462358786,
+      "n_deals": 9884,
+      "deals_v1": 8929,
+      "deals_v2": 913,
+      "deals_v3": 42,
+      "peak_concurrent": 902.5009800792986,
+      "eod": 8
+    },
+    {
+      "base_pct": 0.001,
+      "cagr_pct": 7.723039907669427,
+      "final_equity": 3941.4177267384616,
+      "n_deals": 9884,
+      "deals_v1": 8929,
+      "deals_v2": 913,
+      "deals_v3": 42,
+      "peak_concurrent": 2054.2425905400873,
+      "eod": 8
+    },
+    {
+      "base_pct": 0.002,
+      "cagr_pct": 15.99111439338634,
+      "final_equity": 5169.8449774090295,
+      "n_deals": 9884,
+      "deals_v1": 8929,
+      "deals_v2": 913,
+      "deals_v3": 42,
+      "peak_concurrent": 5037.400141294303,
+      "eod": 8
+    },
+    {
+      "base_pct": 0.003,
+      "cagr_pct": 23.406712363684235,
+      "final_equity": 6489.596251610851,
+      "n_deals": 9764,
+      "deals_v1": 8809,
+      "deals_v2": 913,
+      "deals_v3": 42,
+      "peak_concurrent": 7944.180419546011,
+      "eod": 8
+    },
+    {
+      "base_pct": 0.004,
+      "cagr_pct": 31.529191949904334,
+      "final_equity": 8199.364832037872,
+      "n_deals": 9562,
+      "deals_v1": 8613,
+      "deals_v2": 907,
+      "deals_v3": 42,
+      "peak_concurrent": 12142.807528153944,
+      "eod": 8
+    },
+    {
+      "base_pct": 0.005,
+      "cagr_pct": 41.56527547852973,
+      "final_equity": 10738.392362319171,
+      "n_deals": 8982,
+      "deals_v1": 8091,
+      "deals_v2": 849,
+      "deals_v3": 42,
+      "peak_concurrent": 14230.598200475655,
+      "eod": 8
+    },
+    {
+      "base_pct": 0.007,
+      "cagr_pct": -24.55606955612796,
+      "final_equity": 1066.9869111449261,
+      "n_deals": 5172,
+      "deals_v1": 4612,
+      "deals_v2": 526,
+      "deals_v3": 34,
+      "peak_concurrent": 16386.938625248902,
+      "eod": 6
+    },
+    {
+      "base_pct": 0.01,
+      "cagr_pct": -20.664953289346123,
+      "final_equity": 1283.177642426715,
+      "n_deals": 4218,
+      "deals_v1": 3761,
+      "deals_v2": 423,
+      "deals_v3": 34,
+      "peak_concurrent": 16183.357450723435,
+      "eod": 7
+    },
+    {
+      "base_pct": 0.015,
+      "cagr_pct": -20.095854517560163,
+      "final_equity": 1317.2716146616738,
+      "n_deals": 3586,
+      "deals_v1": 3199,
+      "deals_v2": 356,
+      "deals_v3": 31,
+      "peak_concurrent": 14650.148755043825,
+      "eod": 7
+    },
+    {
+      "base_pct": 0.02,
+      "cagr_pct": -24.187978368614104,
+      "final_equity": 1086.2103310901707,
+      "n_deals": 2424,
+      "deals_v1": 2161,
+      "deals_v2": 239,
+      "deals_v3": 24,
+      "peak_concurrent": 12257.619599160926,
+      "eod": 7
+    },
+    {
+      "base_pct": 0.03,
+      "cagr_pct": -26.367121888640188,
+      "final_equity": 975.9887558127638,
+      "n_deals": 1476,
+      "deals_v1": 1338,
+      "deals_v2": 127,
+      "deals_v3": 11,
+      "peak_concurrent": 11826.766121980903,
+      "eod": 7
+    },
+    {
+      "base_pct": 0.04,
+      "cagr_pct": -24.730681549875655,
+      "final_equity": 1057.9549544830784,
+      "n_deals": 1382,
+      "deals_v1": 1239,
+      "deals_v2": 134,
+      "deals_v3": 9,
+      "peak_concurrent": 11958.69891047418,
+      "eod": 7
+    },
+    {
+      "base_pct": 0.05,
+      "cagr_pct": -33.703500059858,
+      "final_equity": 664.0797572507181,
+      "n_deals": 693,
+      "deals_v1": 618,
+      "deals_v2": 63,
+      "deals_v3": 12,
+      "peak_concurrent": 10548.396731090583,
+      "eod": 6
+    }
+  ],
+  "v1_only_baseline_max_cagr": 34.57,
+  "v1_only_baseline_base_pct": 0.007
+}
