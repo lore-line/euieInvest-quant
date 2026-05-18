@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +39,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from quant.backtest import dca_grid  # noqa: E402
+
+# Globals populated per-N in the parent before forking the worker pool.
+# Workers inherit these via copy-on-write (fork semantics on Linux/WSL2),
+# avoiding the 100+ MB pickle cost of passing bar/signal dicts as task args.
+_BARS_PER_SV: dict = {}
+_SIGNALS_PER_SV: dict = {}
 
 START = "2022-09-15"
 END = "2026-05-17"
@@ -83,55 +91,73 @@ def load_signals_once(snapshot_dir: Path, symbols: list[str], version: int = 1):
     return bars_per_sv, signals_per_sv
 
 
+def _simulate_cell(args: tuple) -> dict:
+    """Worker: simulate one (N, base_pct) cell.
+
+    Reads _BARS_PER_SV and _SIGNALS_PER_SV from module-level globals
+    populated by the parent before fork. The dicts are shared via
+    copy-on-write — no pickle, no per-task data transfer.
+    """
+    N, bp, base_params, starting_capital = args
+    params = {**base_params,
+              "base_order_usd": 0,
+              "base_pct_of_equity": bp}
+    result = dca_grid.simulate_portfolio(
+        _SIGNALS_PER_SV, _BARS_PER_SV, params, starting_capital)
+    m = dca_grid.compute_metrics(result)
+    closed = result["closed_deals"]
+    events = []
+    for d in closed:
+        events.append((d.deal.opened_at, d.deal.cumulative_cost_usd))
+        events.append((d.close_ts, -d.deal.cumulative_cost_usd))
+    events.sort(key=lambda x: x[0])
+    conc, peak = 0.0, 0.0
+    for _, delta in events:
+        conc += delta
+        peak = max(peak, conc)
+    return {
+        "N": N,
+        "base_pct": bp,
+        "cagr_pct": m.get("cagr_pct", 0),
+        "final_equity": m["final_equity"],
+        "n_deals": m["n_deals"],
+        "peak_concurrent": peak,
+        "eod": m.get("exit_breakdown", {}).get("end_of_data", 0),
+    }
+
+
 def run_sweep_at_N(snapshot_dir: Path, N: int, base_pcts: list[float],
-                   base_params: dict) -> dict:
+                   base_params: dict, pool_size: int) -> dict:
+    global _BARS_PER_SV, _SIGNALS_PER_SV
     symbols = MASTER_UNIVERSE[:N]
     print(f"\n{'='*72}")
     print(f"N={N}: {symbols}")
     print(f"{'='*72}")
 
-    bars_per_sv, signals_per_sv = load_signals_once(snapshot_dir, symbols, version=1)
-    n_active = len(bars_per_sv)
-    print(f"Loaded {n_active} (sym, ver) pairs\n")
+    _BARS_PER_SV, _SIGNALS_PER_SV = load_signals_once(
+        snapshot_dir, symbols, version=1)
+    n_active = len(_BARS_PER_SV)
+    print(f"Loaded {n_active} (sym, ver) pairs; dispatching "
+          f"{len(base_pcts)} cells across {pool_size} workers\n")
+
+    args = [(N, bp, base_params, STARTING_CAPITAL) for bp in base_pcts]
+    ctx = mp.get_context("fork")  # explicit; fork lets workers inherit the dicts
+    with ctx.Pool(pool_size) as pool:
+        cells = pool.map(_simulate_cell, args)
+
+    # Pool.map preserves order, but sort by base_pct anyway for safety.
+    cells.sort(key=lambda c: c["base_pct"])
 
     print(f"{'base_pct':>9s} | {'deals':>6s} | {'eod':>4s} | {'CAGR':>8s} | "
           f"{'final $':>9s} | {'peak %':>7s} | {'b×N':>7s}")
     print("-" * 75)
-
-    cells = []
-    for bp in base_pcts:
-        params = {**base_params,
-                  "base_order_usd": 0,
-                  "base_pct_of_equity": bp}
-        result = dca_grid.simulate_portfolio(
-            signals_per_sv, bars_per_sv, params, STARTING_CAPITAL)
-        m = dca_grid.compute_metrics(result)
-        closed = result["closed_deals"]
-        events = []
-        for d in closed:
-            events.append((d.deal.opened_at, d.deal.cumulative_cost_usd))
-            events.append((d.close_ts, -d.deal.cumulative_cost_usd))
-        events.sort(key=lambda x: x[0])
-        conc = 0.0
-        peak = 0.0
-        for _, delta in events:
-            conc += delta
-            peak = max(peak, conc)
-
-        ec = m.get("exit_breakdown", {})
-        print(f"{bp*100:>8.2f}% | {m['n_deals']:>6d} | {ec.get('end_of_data', 0):>4d} | "
-              f"{m.get('cagr_pct', 0):>+7.2f}% | "
-              f"${m['final_equity']:>8.0f} | "
-              f"{peak/STARTING_CAPITAL*100:>6.0f}% | "
-              f"{bp*100*N:>6.2f}%")
-
-        cells.append({
-            "base_pct": bp,
-            "cagr_pct": m.get("cagr_pct", 0),
-            "final_equity": m["final_equity"],
-            "n_deals": m["n_deals"],
-            "peak_concurrent": peak,
-        })
+    for c in cells:
+        print(f"{c['base_pct']*100:>8.2f}% | {c['n_deals']:>6d} | "
+              f"{c['eod']:>4d} | "
+              f"{c['cagr_pct']:>+7.2f}% | "
+              f"${c['final_equity']:>8.0f} | "
+              f"{c['peak_concurrent']/STARTING_CAPITAL*100:>6.0f}% | "
+              f"{c['base_pct']*100*N:>6.2f}%")
 
     positive = [c for c in cells if c["cagr_pct"] > 0]
     if positive:
@@ -153,6 +179,10 @@ def main():
                    help="Dir with intraday_{N}m.parquet files. Default: <repo>/data/snapshots/.")
     p.add_argument("--out", default="reports/cliff-at-500k-friction.json",
                    help="Output JSON path (relative to repo root).")
+    p.add_argument("--workers", type=int,
+                   default=max(1, (os.cpu_count() or 4) - 2),
+                   help="Worker count for base_pct cell parallelism. "
+                        "Defaults to nproc-2 (leaves headroom for OS).")
     args = p.parse_args()
 
     snapshot_dir = Path(args.snapshot_dir) if args.snapshot_dir else dca_grid.SNAPSHOT_DIR
@@ -167,6 +197,7 @@ def main():
           f"step_scale={base_params['so_step_scale']:.2f}")
     print(f"Fee override: fixed_friction_vol_30d = ${FIXED_FRICTION_VOL_30D:,.0f}")
     print(f"Snapshot dir: {snapshot_dir}")
+    print(f"Worker pool: {args.workers} (host has {os.cpu_count()} CPUs)")
 
     base_pcts = [0.0005, 0.0010, 0.0020, 0.0030, 0.0040, 0.0050, 0.0070,
                  0.0100, 0.0150, 0.0200, 0.0300, 0.0400, 0.0500]
@@ -177,7 +208,7 @@ def main():
         if N > len(MASTER_UNIVERSE):
             print(f"\nSkipping N={N} — only {len(MASTER_UNIVERSE)} symbols available")
             continue
-        r = run_sweep_at_N(snapshot_dir, N, base_pcts, base_params)
+        r = run_sweep_at_N(snapshot_dir, N, base_pcts, base_params, args.workers)
         all_results.append(r)
 
     print(f"\n{'='*75}")
