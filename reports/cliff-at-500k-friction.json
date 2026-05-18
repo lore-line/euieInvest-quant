@@ -1,0 +1,996 @@
+{
+  "window": [
+    "2022-09-15",
+    "2026-05-17"
+  ],
+  "starting_capital": 3000.0,
+  "vol_scale": 2.3,
+  "fixed_friction_vol_30d": 500000.0,
+  "friction_round_trip_pct": 0.16,
+  "results": [
+    {
+      "N": 2,
+      "n_active": 2,
+      "cells": [
+        {
+          "N": 2,
+          "base_pct": 0.0005,
+          "cagr_pct": 0.172782581322517,
+          "final_equity": 3019.0606136447545,
+          "n_deals": 680,
+          "peak_concurrent": 86.46297851125571,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.001,
+          "cagr_pct": 0.34585428020361686,
+          "final_equity": 3038.2412831712277,
+          "n_deals": 680,
+          "peak_concurrent": 173.8636401403952,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.002,
+          "cagr_pct": 0.692866905511802,
+          "final_equity": 3076.9657931311576,
+          "n_deals": 680,
+          "peak_concurrent": 351.5083849641402,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.003,
+          "cagr_pct": 1.0410416330122851,
+          "final_equity": 3116.179582978732,
+          "n_deals": 680,
+          "peak_concurrent": 532.9955223063334,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.004,
+          "cagr_pct": 1.3903822315759706,
+          "final_equity": 3155.8887809754215,
+          "n_deals": 680,
+          "peak_concurrent": 718.3872175788051,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.005,
+          "cagr_pct": 1.7408924818927973,
+          "final_equity": 3196.0995914703617,
+          "n_deals": 680,
+          "peak_concurrent": 907.7465254785168,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.007,
+          "cagr_pct": 2.445437119855054,
+          "final_equity": 3278.05125341974,
+          "n_deals": 680,
+          "peak_concurrent": 1298.62471566875,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.01,
+          "cagr_pct": 3.511121665756045,
+          "final_equity": 3404.900428726215,
+          "n_deals": 680,
+          "peak_concurrent": 1916.3279255182376,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.015,
+          "cagr_pct": 5.3111661056064685,
+          "final_equity": 3627.217652770154,
+          "n_deals": 680,
+          "peak_concurrent": 3034.090369324614,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.02,
+          "cagr_pct": 7.063439869102761,
+          "final_equity": 3853.5987577703227,
+          "n_deals": 673,
+          "peak_concurrent": 4269.990133065157,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.03,
+          "cagr_pct": 1.212110002298461,
+          "final_equity": 3135.5790547155707,
+          "n_deals": 627,
+          "peak_concurrent": 3668.4952688905437,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.04,
+          "cagr_pct": 0.125428635382141,
+          "final_equity": 3013.8279974270217,
+          "n_deals": 602,
+          "peak_concurrent": 4448.206068937708,
+          "eod": 1
+        },
+        {
+          "N": 2,
+          "base_pct": 0.05,
+          "cagr_pct": 6.123031188643546,
+          "final_equity": 3730.8657465286997,
+          "n_deals": 514,
+          "peak_concurrent": 3883.5860314419806,
+          "eod": 1
+        }
+      ]
+    },
+    {
+      "N": 4,
+      "n_active": 4,
+      "cells": [
+        {
+          "N": 4,
+          "base_pct": 0.0005,
+          "cagr_pct": 0.7709025329071029,
+          "final_equity": 3085.723300921624,
+          "n_deals": 2604,
+          "peak_concurrent": 195.03218072093824,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.001,
+          "cagr_pct": 1.5476497926673272,
+          "final_equity": 3173.884838629077,
+          "n_deals": 2604,
+          "peak_concurrent": 399.88122986335924,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.002,
+          "cagr_pct": 3.1188532537493874,
+          "final_equity": 3357.8007132973385,
+          "n_deals": 2604,
+          "peak_concurrent": 840.518847070431,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.003,
+          "cagr_pct": 4.71396312325425,
+          "final_equity": 3552.3235896557035,
+          "n_deals": 2604,
+          "peak_concurrent": 1325.0159009951417,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.004,
+          "cagr_pct": 6.333337342308121,
+          "final_equity": 3758.0623515449806,
+          "n_deals": 2604,
+          "peak_concurrent": 1856.6846154013604,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.005,
+          "cagr_pct": 7.977339128695982,
+          "final_equity": 3975.660673766489,
+          "n_deals": 2604,
+          "peak_concurrent": 2439.0595555688055,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.007,
+          "cagr_pct": 11.340705118721939,
+          "final_equity": 4449.196638253735,
+          "n_deals": 2604,
+          "peak_concurrent": 3771.2626789659585,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.01,
+          "cagr_pct": 16.56075013649405,
+          "final_equity": 5263.603124982243,
+          "n_deals": 2602,
+          "peak_concurrent": 6252.632499512264,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.015,
+          "cagr_pct": 7.442798549679841,
+          "final_equity": 3903.93055714867,
+          "n_deals": 2423,
+          "peak_concurrent": 9197.42955617603,
+          "eod": 2
+        },
+        {
+          "N": 4,
+          "base_pct": 0.02,
+          "cagr_pct": 10.2165318441096,
+          "final_equity": 4286.597644002782,
+          "n_deals": 2287,
+          "peak_concurrent": 7847.220946084238,
+          "eod": 3
+        },
+        {
+          "N": 4,
+          "base_pct": 0.03,
+          "cagr_pct": 18.276240600542582,
+          "final_equity": 5553.4366127305175,
+          "n_deals": 2006,
+          "peak_concurrent": 11378.388446757464,
+          "eod": 3
+        },
+        {
+          "N": 4,
+          "base_pct": 0.04,
+          "cagr_pct": -6.8616868348376325,
+          "final_equity": 2311.3295927363492,
+          "n_deals": 1095,
+          "peak_concurrent": 16500.451563992578,
+          "eod": 3
+        },
+        {
+          "N": 4,
+          "base_pct": 0.05,
+          "cagr_pct": 10.788098554959769,
+          "final_equity": 4368.718028766684,
+          "n_deals": 1195,
+          "peak_concurrent": 14110.051733662256,
+          "eod": 3
+        }
+      ]
+    },
+    {
+      "N": 6,
+      "n_active": 6,
+      "cells": [
+        {
+          "N": 6,
+          "base_pct": 0.0005,
+          "cagr_pct": 1.3973157624350918,
+          "final_equity": 3156.680613952516,
+          "n_deals": 4488,
+          "peak_concurrent": 344.64836803468904,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.001,
+          "cagr_pct": 2.81377905741258,
+          "final_equity": 3321.4994381731417,
+          "n_deals": 4488,
+          "peak_concurrent": 722.5903732448105,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.002,
+          "cagr_pct": 5.7051818681344235,
+          "final_equity": 3677.255042806743,
+          "n_deals": 4488,
+          "peak_concurrent": 1588.1092146018675,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.003,
+          "cagr_pct": 8.676309976665486,
+          "final_equity": 4070.896189940325,
+          "n_deals": 4488,
+          "peak_concurrent": 2617.6501183465953,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.004,
+          "cagr_pct": 11.729320807466204,
+          "final_equity": 4506.434633659759,
+          "n_deals": 4488,
+          "peak_concurrent": 3835.0596972527264,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.005,
+          "cagr_pct": 14.826543547942483,
+          "final_equity": 4981.9528833149025,
+          "n_deals": 4488,
+          "peak_concurrent": 4592.5955572420635,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.007,
+          "cagr_pct": 18.237564233782,
+          "final_equity": 5546.777213593114,
+          "n_deals": 4380,
+          "peak_concurrent": 6670.116479452307,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.01,
+          "cagr_pct": 13.271895652841192,
+          "final_equity": 4738.93050922796,
+          "n_deals": 3852,
+          "peak_concurrent": 11306.14541130528,
+          "eod": 4
+        },
+        {
+          "N": 6,
+          "base_pct": 0.015,
+          "cagr_pct": -7.1742498713436405,
+          "final_equity": 2283.0000074255136,
+          "n_deals": 2431,
+          "peak_concurrent": 11969.475153474108,
+          "eod": 3
+        },
+        {
+          "N": 6,
+          "base_pct": 0.02,
+          "cagr_pct": -12.149827159761529,
+          "final_equity": 1865.2140471565062,
+          "n_deals": 2154,
+          "peak_concurrent": 12126.911623704986,
+          "eod": 2
+        },
+        {
+          "N": 6,
+          "base_pct": 0.03,
+          "cagr_pct": -12.873755202358506,
+          "final_equity": 1809.442039322463,
+          "n_deals": 1555,
+          "peak_concurrent": 11822.222233116014,
+          "eod": 5
+        },
+        {
+          "N": 6,
+          "base_pct": 0.04,
+          "cagr_pct": -13.78302876285501,
+          "final_equity": 1741.1217061627626,
+          "n_deals": 1263,
+          "peak_concurrent": 9297.648176982395,
+          "eod": 3
+        },
+        {
+          "N": 6,
+          "base_pct": 0.05,
+          "cagr_pct": -13.865960384715969,
+          "final_equity": 1734.9853067758463,
+          "n_deals": 1130,
+          "peak_concurrent": 13866.559170829038,
+          "eod": 3
+        }
+      ]
+    },
+    {
+      "N": 8,
+      "n_active": 8,
+      "cells": [
+        {
+          "N": 8,
+          "base_pct": 0.0005,
+          "cagr_pct": 1.959889290035366,
+          "final_equity": 3221.411459852983,
+          "n_deals": 6315,
+          "peak_concurrent": 498.40531959983605,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.001,
+          "cagr_pct": 3.957173378336054,
+          "final_equity": 3459.0397993339393,
+          "n_deals": 6315,
+          "peak_concurrent": 1023.2239505957002,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.002,
+          "cagr_pct": 8.066744451312037,
+          "final_equity": 3987.7508999014717,
+          "n_deals": 6315,
+          "peak_concurrent": 2156.3018555339204,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.003,
+          "cagr_pct": 12.334481146052223,
+          "final_equity": 4596.630749408766,
+          "n_deals": 6315,
+          "peak_concurrent": 3408.0040166356835,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.004,
+          "cagr_pct": 16.730418928655165,
+          "final_equity": 5291.766892487477,
+          "n_deals": 6312,
+          "peak_concurrent": 4787.717964414643,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.005,
+          "cagr_pct": 21.138938670789663,
+          "final_equity": 6062.699898341429,
+          "n_deals": 6281,
+          "peak_concurrent": 6305.488852391847,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.007,
+          "cagr_pct": 22.86711738274121,
+          "final_equity": 6386.099608947331,
+          "n_deals": 5346,
+          "peak_concurrent": 7949.694584461464,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.01,
+          "cagr_pct": -2.8130649250334483,
+          "final_equity": 2701.830242174283,
+          "n_deals": 3679,
+          "peak_concurrent": 9320.692258022596,
+          "eod": 7
+        },
+        {
+          "N": 8,
+          "base_pct": 0.015,
+          "cagr_pct": -7.376666441654023,
+          "final_equity": 2264.788994517445,
+          "n_deals": 3102,
+          "peak_concurrent": 16993.18392372409,
+          "eod": 4
+        },
+        {
+          "N": 8,
+          "base_pct": 0.02,
+          "cagr_pct": -10.78815565539406,
+          "final_equity": 1973.491917685901,
+          "n_deals": 1872,
+          "peak_concurrent": 10613.55323916629,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.03,
+          "cagr_pct": -19.051482188820245,
+          "final_equity": 1381.546189646585,
+          "n_deals": 1570,
+          "peak_concurrent": 9505.155141078321,
+          "eod": 4
+        },
+        {
+          "N": 8,
+          "base_pct": 0.04,
+          "cagr_pct": -17.20380151736475,
+          "final_equity": 1500.8052969381456,
+          "n_deals": 1249,
+          "peak_concurrent": 9289.444916980478,
+          "eod": 5
+        },
+        {
+          "N": 8,
+          "base_pct": 0.05,
+          "cagr_pct": -28.91579229493042,
+          "final_equity": 857.6663157640528,
+          "n_deals": 708,
+          "peak_concurrent": 9058.333271286232,
+          "eod": 4
+        }
+      ]
+    },
+    {
+      "N": 10,
+      "n_active": 10,
+      "cells": [
+        {
+          "N": 10,
+          "base_pct": 0.0005,
+          "cagr_pct": 2.7608247475377823,
+          "final_equity": 3315.2275218520103,
+          "n_deals": 8929,
+          "peak_concurrent": 720.8337066400065,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.001,
+          "cagr_pct": 5.595710466283044,
+          "final_equity": 3663.3028488122727,
+          "n_deals": 8929,
+          "peak_concurrent": 1497.7207281354788,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.002,
+          "cagr_pct": 11.495494933062611,
+          "final_equity": 4471.931384467007,
+          "n_deals": 8929,
+          "peak_concurrent": 3232.7990575095364,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.003,
+          "cagr_pct": 17.5587318388827,
+          "final_equity": 5430.837244715764,
+          "n_deals": 8899,
+          "peak_concurrent": 5281.7053407004,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.004,
+          "cagr_pct": 21.974063405828858,
+          "final_equity": 6217.453311553798,
+          "n_deals": 8711,
+          "peak_concurrent": 7472.907643115699,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.005,
+          "cagr_pct": 30.18284234778823,
+          "final_equity": 7895.63189583816,
+          "n_deals": 7881,
+          "peak_concurrent": 10839.7710007255,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.007,
+          "cagr_pct": 34.57292263837637,
+          "final_equity": 8917.249085066185,
+          "n_deals": 6247,
+          "peak_concurrent": 14475.709872015384,
+          "eod": 6
+        },
+        {
+          "N": 10,
+          "base_pct": 0.01,
+          "cagr_pct": -26.98281759193949,
+          "final_equity": 946.3811280058819,
+          "n_deals": 3924,
+          "peak_concurrent": 12312.465256553282,
+          "eod": 5
+        },
+        {
+          "N": 10,
+          "base_pct": 0.015,
+          "cagr_pct": -24.663452535587773,
+          "final_equity": 1061.4258221956648,
+          "n_deals": 3715,
+          "peak_concurrent": 12162.498729035186,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.02,
+          "cagr_pct": -30.14517855272485,
+          "final_equity": 804.4914165087665,
+          "n_deals": 1999,
+          "peak_concurrent": 8708.400546663952,
+          "eod": 7
+        },
+        {
+          "N": 10,
+          "base_pct": 0.03,
+          "cagr_pct": -27.33869200567578,
+          "final_equity": 929.5688563944057,
+          "n_deals": 1847,
+          "peak_concurrent": 11392.350914105984,
+          "eod": 4
+        },
+        {
+          "N": 10,
+          "base_pct": 0.04,
+          "cagr_pct": -28.78676688784233,
+          "final_equity": 863.391463394342,
+          "n_deals": 1134,
+          "peak_concurrent": 9080.668265028857,
+          "eod": 5
+        },
+        {
+          "N": 10,
+          "base_pct": 0.05,
+          "cagr_pct": -25.530030245368827,
+          "final_equity": 1017.3163703121025,
+          "n_deals": 930,
+          "peak_concurrent": 10548.095923929774,
+          "eod": 6
+        }
+      ]
+    },
+    {
+      "N": 12,
+      "n_active": 12,
+      "cells": [
+        {
+          "N": 12,
+          "base_pct": 0.0005,
+          "cagr_pct": 3.187860002673215,
+          "final_equity": 3366.0517925228205,
+          "n_deals": 10648,
+          "peak_concurrent": 738.6750573900874,
+          "eod": 9
+        },
+        {
+          "N": 12,
+          "base_pct": 0.001,
+          "cagr_pct": 6.475232744411619,
+          "final_equity": 3776.49342515177,
+          "n_deals": 10648,
+          "peak_concurrent": 1544.0999568836517,
+          "eod": 9
+        },
+        {
+          "N": 12,
+          "base_pct": 0.002,
+          "cagr_pct": 13.360848973460815,
+          "final_equity": 4752.598036863283,
+          "n_deals": 10648,
+          "peak_concurrent": 3855.736633661621,
+          "eod": 9
+        },
+        {
+          "N": 12,
+          "base_pct": 0.003,
+          "cagr_pct": 19.304670381831546,
+          "final_equity": 5732.657048439907,
+          "n_deals": 10547,
+          "peak_concurrent": 6067.283947156732,
+          "eod": 9
+        },
+        {
+          "N": 12,
+          "base_pct": 0.004,
+          "cagr_pct": 25.75389038698901,
+          "final_equity": 6954.045356750139,
+          "n_deals": 10332,
+          "peak_concurrent": 9119.12487428944,
+          "eod": 9
+        },
+        {
+          "N": 12,
+          "base_pct": 0.005,
+          "cagr_pct": 34.96459254359765,
+          "final_equity": 9012.835038156114,
+          "n_deals": 9470,
+          "peak_concurrent": 12089.027661406211,
+          "eod": 9
+        },
+        {
+          "N": 12,
+          "base_pct": 0.007,
+          "cagr_pct": -29.6500219839813,
+          "final_equity": 825.6110632597635,
+          "n_deals": 5097,
+          "peak_concurrent": 11168.529730219649,
+          "eod": 8
+        },
+        {
+          "N": 12,
+          "base_pct": 0.01,
+          "cagr_pct": -23.299635914871153,
+          "final_equity": 1133.640255370599,
+          "n_deals": 4694,
+          "peak_concurrent": 14802.380755026079,
+          "eod": 5
+        },
+        {
+          "N": 12,
+          "base_pct": 0.015,
+          "cagr_pct": -22.1458432995167,
+          "final_equity": 1197.4699725457044,
+          "n_deals": 4236,
+          "peak_concurrent": 14323.949844901486,
+          "eod": 7
+        },
+        {
+          "N": 12,
+          "base_pct": 0.02,
+          "cagr_pct": -31.825889259453376,
+          "final_equity": 735.7287218598518,
+          "n_deals": 1945,
+          "peak_concurrent": 9720.370199345703,
+          "eod": 7
+        },
+        {
+          "N": 12,
+          "base_pct": 0.03,
+          "cagr_pct": -35.79676665308467,
+          "final_equity": 590.3388908688596,
+          "n_deals": 1172,
+          "peak_concurrent": 10027.444319897499,
+          "eod": 4
+        },
+        {
+          "N": 12,
+          "base_pct": 0.04,
+          "cagr_pct": -31.12189889217841,
+          "final_equity": 763.9877230439068,
+          "n_deals": 928,
+          "peak_concurrent": 11522.489499506488,
+          "eod": 5
+        },
+        {
+          "N": 12,
+          "base_pct": 0.05,
+          "cagr_pct": -36.95533402707264,
+          "final_equity": 552.1882120982284,
+          "n_deals": 873,
+          "peak_concurrent": 10233.383118383514,
+          "eod": 4
+        }
+      ]
+    },
+    {
+      "N": 16,
+      "n_active": 16,
+      "cells": [
+        {
+          "N": 16,
+          "base_pct": 0.0005,
+          "cagr_pct": 4.80390272819784,
+          "final_equity": 3563.5301198702896,
+          "n_deals": 15620,
+          "peak_concurrent": 1248.850638134938,
+          "eod": 12
+        },
+        {
+          "N": 16,
+          "base_pct": 0.001,
+          "cagr_pct": 9.833910268486857,
+          "final_equity": 4232.255413786901,
+          "n_deals": 15620,
+          "peak_concurrent": 2944.7112223690733,
+          "eod": 12
+        },
+        {
+          "N": 16,
+          "base_pct": 0.002,
+          "cagr_pct": 18.498926566291154,
+          "final_equity": 5591.892476481196,
+          "n_deals": 15367,
+          "peak_concurrent": 6658.47311172785,
+          "eod": 12
+        },
+        {
+          "N": 16,
+          "base_pct": 0.003,
+          "cagr_pct": 27.707368614157502,
+          "final_equity": 7358.645208065651,
+          "n_deals": 14910,
+          "peak_concurrent": 12270.906619336789,
+          "eod": 12
+        },
+        {
+          "N": 16,
+          "base_pct": 0.004,
+          "cagr_pct": 26.120871586769457,
+          "final_equity": 7028.787418174495,
+          "n_deals": 12281,
+          "peak_concurrent": 13964.71686170246,
+          "eod": 12
+        },
+        {
+          "N": 16,
+          "base_pct": 0.005,
+          "cagr_pct": -11.000728334889509,
+          "final_equity": 1956.2948795758612,
+          "n_deals": 8613,
+          "peak_concurrent": 13431.628453886506,
+          "eod": 8
+        },
+        {
+          "N": 16,
+          "base_pct": 0.007,
+          "cagr_pct": -27.43223938389456,
+          "final_equity": 925.1857868589595,
+          "n_deals": 6728,
+          "peak_concurrent": 15688.415461976645,
+          "eod": 7
+        },
+        {
+          "N": 16,
+          "base_pct": 0.01,
+          "cagr_pct": -19.803649329194872,
+          "final_equity": 1335.0309569176857,
+          "n_deals": 6504,
+          "peak_concurrent": 12951.827525895298,
+          "eod": 10
+        },
+        {
+          "N": 16,
+          "base_pct": 0.015,
+          "cagr_pct": -23.470523848835224,
+          "final_equity": 1124.4015236938449,
+          "n_deals": 3782,
+          "peak_concurrent": 12016.712406629356,
+          "eod": 9
+        },
+        {
+          "N": 16,
+          "base_pct": 0.02,
+          "cagr_pct": -25.767983629599733,
+          "final_equity": 1005.4414973869586,
+          "n_deals": 2709,
+          "peak_concurrent": 10858.408002154101,
+          "eod": 8
+        },
+        {
+          "N": 16,
+          "base_pct": 0.03,
+          "cagr_pct": -22.80659330030087,
+          "final_equity": 1160.6051889807288,
+          "n_deals": 2189,
+          "peak_concurrent": 11171.41448202571,
+          "eod": 8
+        },
+        {
+          "N": 16,
+          "base_pct": 0.04,
+          "cagr_pct": -25.621642387778508,
+          "final_equity": 1012.7325300943598,
+          "n_deals": 1752,
+          "peak_concurrent": 13068.27096499607,
+          "eod": 7
+        },
+        {
+          "N": 16,
+          "base_pct": 0.05,
+          "cagr_pct": -35.857560709438815,
+          "final_equity": 588.2906954091661,
+          "n_deals": 881,
+          "peak_concurrent": 10399.158502516966,
+          "eod": 6
+        }
+      ]
+    },
+    {
+      "N": 20,
+      "n_active": 20,
+      "cells": [
+        {
+          "N": 20,
+          "base_pct": 0.0005,
+          "cagr_pct": 6.414344557232465,
+          "final_equity": 3768.576503632185,
+          "n_deals": 20412,
+          "peak_concurrent": 1742.0167643159507,
+          "eod": 14
+        },
+        {
+          "N": 20,
+          "base_pct": 0.001,
+          "cagr_pct": 13.230593908717525,
+          "final_equity": 4732.5942953746735,
+          "n_deals": 20412,
+          "peak_concurrent": 4323.608882753434,
+          "eod": 14
+        },
+        {
+          "N": 20,
+          "base_pct": 0.002,
+          "cagr_pct": 22.661357193197283,
+          "final_equity": 6346.95199545058,
+          "n_deals": 19650,
+          "peak_concurrent": 9803.91949356886,
+          "eod": 15
+        },
+        {
+          "N": 20,
+          "base_pct": 0.003,
+          "cagr_pct": 27.520644306744057,
+          "final_equity": 7319.249411000547,
+          "n_deals": 17172,
+          "peak_concurrent": 11770.821026753543,
+          "eod": 16
+        },
+        {
+          "N": 20,
+          "base_pct": 0.004,
+          "cagr_pct": -10.754772349434683,
+          "final_equity": 1976.2025686165027,
+          "n_deals": 10439,
+          "peak_concurrent": 11604.174048430239,
+          "eod": 14
+        },
+        {
+          "N": 20,
+          "base_pct": 0.005,
+          "cagr_pct": -7.281995919371265,
+          "final_equity": 2273.2931057442133,
+          "n_deals": 10138,
+          "peak_concurrent": 15247.097677122088,
+          "eod": 12
+        },
+        {
+          "N": 20,
+          "base_pct": 0.007,
+          "cagr_pct": -21.150890826503133,
+          "final_equity": 1254.5777253044464,
+          "n_deals": 8404,
+          "peak_concurrent": 18931.66828182833,
+          "eod": 11
+        },
+        {
+          "N": 20,
+          "base_pct": 0.01,
+          "cagr_pct": -28.408673239657666,
+          "final_equity": 880.3284429014617,
+          "n_deals": 5617,
+          "peak_concurrent": 11095.317288138183,
+          "eod": 11
+        },
+        {
+          "N": 20,
+          "base_pct": 0.015,
+          "cagr_pct": -33.43425353015047,
+          "final_equity": 674.0280093273079,
+          "n_deals": 2412,
+          "peak_concurrent": 10634.020691690801,
+          "eod": 9
+        },
+        {
+          "N": 20,
+          "base_pct": 0.02,
+          "cagr_pct": -33.11724884045706,
+          "final_equity": 685.8793014335058,
+          "n_deals": 2109,
+          "peak_concurrent": 10379.46133354517,
+          "eod": 9
+        },
+        {
+          "N": 20,
+          "base_pct": 0.03,
+          "cagr_pct": -27.004891647306874,
+          "final_equity": 945.3319178049413,
+          "n_deals": 1828,
+          "peak_concurrent": 13498.027696212812,
+          "eod": 7
+        },
+        {
+          "N": 20,
+          "base_pct": 0.04,
+          "cagr_pct": -29.946982743294924,
+          "final_equity": 812.8971913741304,
+          "n_deals": 1042,
+          "peak_concurrent": 10753.559837562969,
+          "eod": 8
+        },
+        {
+          "N": 20,
+          "base_pct": 0.05,
+          "cagr_pct": -32.474697278932126,
+          "final_equity": 710.3652846158132,
+          "n_deals": 904,
+          "peak_concurrent": 8782.150572405102,
+          "eod": 8
+        }
+      ]
+    }
+  ]
+}
