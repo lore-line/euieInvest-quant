@@ -97,15 +97,15 @@ def main() -> None:
         pct = count / stats["n_total_days"] * 100
         print(f"    {regime:35s}: {count:5d} ({pct:5.1f}%)")
 
-    # Acceptance check
+    # Acceptance check (ASCII-only for Windows cp1252 console compat)
     print("\n=== Day 2 acceptance check ===")
     coverage = stats["coverage_rate"]
     if 0.50 <= coverage <= 0.70:
-        print(f"  ✓ Coverage {coverage*100:.1f}% in target 50-70% band")
+        print(f"  [PASS] Coverage {coverage*100:.1f}% in target 50-70% band")
     elif coverage < 0.50:
-        print(f"  ✗ Coverage {coverage*100:.1f}% BELOW 50% — rules too strict, need to loosen thresholds")
+        print(f"  [FAIL] Coverage {coverage*100:.1f}% BELOW 50% - rules too strict, need to loosen thresholds")
     else:
-        print(f"  ⚠ Coverage {coverage*100:.1f}% ABOVE 70% — rules too loose, may want to tighten")
+        print(f"  [WARN] Coverage {coverage*100:.1f}% ABOVE 70% - rules too loose, may want to tighten")
 
     # Check no single regime dominates
     if stats["n_labeled_days"] > 0:
@@ -115,9 +115,9 @@ def main() -> None:
         )
         max_pct = max_count / stats["n_labeled_days"] * 100
         if max_pct < 80:
-            print(f"  ✓ No single regime dominates ({max_regime}: {max_pct:.1f}% of labeled)")
+            print(f"  [PASS] No single regime dominates ({max_regime}: {max_pct:.1f}% of labeled)")
         else:
-            print(f"  ⚠ {max_regime} dominates at {max_pct:.1f}% — rules need rebalancing")
+            print(f"  [WARN] {max_regime} dominates at {max_pct:.1f}% - rules need rebalancing")
 
     # Save intermediate artifact for Day 3 training input
     out_path = SNAPSHOTS / "regime_features_and_labels.parquet"

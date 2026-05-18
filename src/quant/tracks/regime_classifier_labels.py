@@ -76,8 +76,14 @@ class LabelThresholds:
     decoupled_btc_equity_corr_ceiling: float = 0.40
 
     # choppy-recovery
-    choppy_drawdown_threshold: float = -0.20
-    choppy_btc_atr_floor: float = 2.5
+    # Relaxed per server-team Day 3 input (issue #20 comment 13:39Z 2026-05-18):
+    # original `-0.20 / 2.5` was too strict; captured only the 2022 post-FTX
+    # depth but missed the broader 2022-2023 post-Merge chop-within-bear band
+    # that grid strategies exploit. Relaxed to `-0.10 / 2.0` to widen coverage
+    # while preserving the BTC-uptrend (SMA50>SMA200) precondition that
+    # distinguishes choppy_recovery from pure bear_trend.
+    choppy_drawdown_threshold: float = -0.10
+    choppy_btc_atr_floor: float = 2.0
 
     # steady-bull
     steady_vix_ceiling: float = 18.0
