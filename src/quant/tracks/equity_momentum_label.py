@@ -146,11 +146,16 @@ def compute_equity_momentum_label(
     window_complete = pl.col(f"_fwd_close_{H}").is_not_null()
 
     fwd_col = spec.forward_max_column()
+    # Also capture exit-at-horizon close BEFORE we drop the bookkeeping shift cols
+    # (shift in post-filter dataframe doesn't work — it operates on the sparse
+    # per-symbol filtered series, jumping over many calendar days).
     df = df.with_columns(
         **{
             fwd_col: pl.when(window_complete)
             .then((forward_max / pl.col("close_adj") - 1.0) * 100.0)
-            .otherwise(None)
+            .otherwise(None),
+            f"exit_close_adj_{H}td": pl.col(f"_fwd_close_{H}"),
+            f"exit_date_{H}td": pl.col("date").shift(-H).over("symbol"),
         }
     )
     df = df.drop([f"_fwd_close_{i}" for i in range(1, H + 1)])
