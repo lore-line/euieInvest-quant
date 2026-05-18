@@ -1,0 +1,609 @@
+{
+  "symbol": "BTC-USD",
+  "window": [
+    "2022-09-15",
+    "2026-05-17"
+  ],
+  "starting_capital": 3000.0,
+  "fixed_friction_vol_30d": 500000.0,
+  "signal_counts": {
+    "v0.5": 11396,
+    "v1": 326,
+    "v2": 6,
+    "v3": 0,
+    "v4": 0,
+    "v5": 0
+  },
+  "results": [
+    {
+      "versions": [
+        1,
+        2,
+        3
+      ],
+      "label": "v1+v2+v3",
+      "cells": [
+        {
+          "base_pct": 0.0005,
+          "cagr_pct": 0.0565337367793628,
+          "final_equity": 3006.226888889236,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.001,
+          "cagr_pct": 0.11309831907064805,
+          "final_equity": 3012.466579390646,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.002,
+          "cagr_pct": 0.22632008525178549,
+          "final_equity": 3024.9844695623033,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.003,
+          "cagr_pct": 0.3396654287525225,
+          "final_equity": 3037.553879706229,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.004,
+          "cagr_pct": 0.4531344799145298,
+          "final_equity": 3050.175019858521,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.005,
+          "cagr_pct": 0.5667273692126829,
+          "final_equity": 3062.848100903543,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.007,
+          "cagr_pct": 0.7942851847812626,
+          "final_equity": 3088.3509334707046,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.01,
+          "cagr_pct": 1.1365539636831956,
+          "final_equity": 3127.000060277539,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.015,
+          "cagr_pct": 1.7094961594534164,
+          "final_equity": 3192.4826683408255,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.02,
+          "cagr_pct": 2.285570416249816,
+          "final_equity": 3259.3232605260528,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.03,
+          "cagr_pct": 3.4471813727377176,
+          "final_equity": 3397.1905312277545,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.04,
+          "cagr_pct": 4.621520200435891,
+          "final_equity": 3540.8318833010644,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.05,
+          "cagr_pct": 5.808721632288494,
+          "final_equity": 3690.486777722755,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.07,
+          "cagr_pct": 8.222258149832129,
+          "final_equity": 4008.8446104515533,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.1,
+          "cagr_pct": 11.94248081878968,
+          "final_equity": 4538.056797609013,
+          "n_deals": 237,
+          "deals_by_version": {
+            "v1": 231,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.15,
+          "cagr_pct": 13.339630609564491,
+          "final_equity": 4749.335270396024,
+          "n_deals": 205,
+          "deals_by_version": {
+            "v1": 199,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.2,
+          "cagr_pct": 17.907402492763524,
+          "final_equity": 5490.165294029581,
+          "n_deals": 203,
+          "deals_by_version": {
+            "v1": 197,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.25,
+          "cagr_pct": 22.62261844956901,
+          "final_equity": 6339.6011967762115,
+          "n_deals": 200,
+          "deals_by_version": {
+            "v1": 194,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.3,
+          "cagr_pct": 27.70977858969854,
+          "final_equity": 7359.154679750869,
+          "n_deals": 200,
+          "deals_by_version": {
+            "v1": 194,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.4,
+          "cagr_pct": 17.290930819950567,
+          "final_equity": 5385.587280819565,
+          "n_deals": 153,
+          "deals_by_version": {
+            "v1": 147,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        },
+        {
+          "base_pct": 0.5,
+          "cagr_pct": 22.047374612396254,
+          "final_equity": 6231.174074588789,
+          "n_deals": 153,
+          "deals_by_version": {
+            "v1": 147,
+            "v2": 6,
+            "v3": 0
+          },
+          "eod": 0
+        }
+      ]
+    },
+    {
+      "versions": [
+        0.5,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "label": "v0.5+v1+v2+v3+v4+v5",
+      "cells": [
+        {
+          "base_pct": 0.0005,
+          "cagr_pct": 0.22340912394833712,
+          "final_equity": 3024.662158256919,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.001,
+          "cagr_pct": 0.44731211484689837,
+          "final_equity": 3049.526472515142,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.002,
+          "cagr_pct": 0.8966040239302586,
+          "final_equity": 3099.86819203254,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.003,
+          "cagr_pct": 1.3478844035929693,
+          "final_equity": 3151.038539890286,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.004,
+          "cagr_pct": 1.8011619678470314,
+          "final_equity": 3203.0511164494114,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.005,
+          "cagr_pct": 2.2564454685369384,
+          "final_equity": 3255.9197446690687,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.007,
+          "cagr_pct": 3.1730654767333055,
+          "final_equity": 3364.2815827746053,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.01,
+          "cagr_pct": 4.563261001831909,
+          "final_equity": 3533.603508891492,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.015,
+          "cagr_pct": 6.921559762599139,
+          "final_equity": 3834.8965314198567,
+          "n_deals": 2015,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.02,
+          "cagr_pct": 9.18101072204034,
+          "final_equity": 4140.686244622827,
+          "n_deals": 2004,
+          "deals_by_version": {
+            "v0.5": 1778,
+            "v1": 220,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.03,
+          "cagr_pct": 11.874697321671125,
+          "final_equity": 4527.9837098184935,
+          "n_deals": 1983,
+          "deals_by_version": {
+            "v0.5": 1746,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.04,
+          "cagr_pct": 15.499833163235222,
+          "final_equity": 5089.964271198501,
+          "n_deals": 1956,
+          "deals_by_version": {
+            "v0.5": 1737,
+            "v1": 213,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.05,
+          "cagr_pct": 18.74280731210167,
+          "final_equity": 5634.230334458812,
+          "n_deals": 1800,
+          "deals_by_version": {
+            "v0.5": 1563,
+            "v1": 231,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.07,
+          "cagr_pct": 25.20326474350043,
+          "final_equity": 6842.987715108435,
+          "n_deals": 1762,
+          "deals_by_version": {
+            "v0.5": 1555,
+            "v1": 201,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.1,
+          "cagr_pct": 34.831501097332996,
+          "final_equity": 8980.271261478296,
+          "n_deals": 1725,
+          "deals_by_version": {
+            "v0.5": 1523,
+            "v1": 197,
+            "v2": 5,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.15,
+          "cagr_pct": 30.242003971615805,
+          "final_equity": 7908.8038783599,
+          "n_deals": 1022,
+          "deals_by_version": {
+            "v0.5": 819,
+            "v1": 197,
+            "v2": 6,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.2,
+          "cagr_pct": 32.08347804559748,
+          "final_equity": 8326.846461224737,
+          "n_deals": 940,
+          "deals_by_version": {
+            "v0.5": 777,
+            "v1": 159,
+            "v2": 4,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.25,
+          "cagr_pct": 22.85512777173444,
+          "final_equity": 6383.813677849149,
+          "n_deals": 729,
+          "deals_by_version": {
+            "v0.5": 651,
+            "v1": 77,
+            "v2": 1,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.3,
+          "cagr_pct": 27.417240948654744,
+          "final_equity": 7297.499107769514,
+          "n_deals": 729,
+          "deals_by_version": {
+            "v0.5": 651,
+            "v1": 77,
+            "v2": 1,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.4,
+          "cagr_pct": 30.313250226057487,
+          "final_equity": 7924.687639037337,
+          "n_deals": 494,
+          "deals_by_version": {
+            "v0.5": 347,
+            "v1": 143,
+            "v2": 4,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        },
+        {
+          "base_pct": 0.5,
+          "cagr_pct": 39.069919980570475,
+          "final_equity": 10060.134463938753,
+          "n_deals": 494,
+          "deals_by_version": {
+            "v0.5": 347,
+            "v1": 143,
+            "v2": 4,
+            "v3": 0,
+            "v4": 0,
+            "v5": 0
+          },
+          "eod": 1
+        }
+      ]
+    }
+  ]
+}
