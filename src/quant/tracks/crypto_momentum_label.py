@@ -73,8 +73,10 @@ def compute_crypto_momentum_label(
     `close` (close_adj also OK since crypto doesn't split). The function
     uses `close` (or `close_adj` if present) for breakout + horizon calc.
     """
-    # Use close_adj if available, else close
-    if "close_adj" in ohlcv.columns:
+    # Use close_adj if available AND populated, else close. Crypto symbols
+    # from the sidecar OHLCV endpoint have a close_adj column for schema
+    # compatibility but it's NULL (no splits/dividends).
+    if "close_adj" in ohlcv.columns and ohlcv["close_adj"].drop_nulls().len() > 0:
         price_col = "close_adj"
     elif "close" in ohlcv.columns:
         price_col = "close"
