@@ -103,6 +103,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "(fee=0, spread=0.04%%/leg, slip=ATR×0.18 for stops / ×0.08 for TP). "
              "small_cap_atr requires `entry_atr_pct_14` column on signals.parquet.",
     )
+    p.add_argument(
+        "--survivorship-haircut-pct", type=float, default=0.25,
+        help="Survivorship-bias haircut applied to net P&L per server-team convention "
+             "(PR #1 issuecomment-4472966936). Default 0.25 = 25%% (quant-stream default, "
+             "broad universe high-turnover ML). 0.0 for currency/single-symbol, 0.05-0.15 "
+             "for liquid mid-cap-only, 0.20-0.30 for small-cap-heavy. Written to "
+             "friction_breakdown.json; platform respects this value at ingest time. "
+             "Also produces signals_haircut_adjusted.parquet with per-trade adjusted P&L.",
+    )
     return p.parse_args(argv)
 
 
@@ -324,6 +333,30 @@ def main(argv: list[str] | None = None) -> int:
         100.0 * total_friction_usd / abs(gross_total_usd) if abs(gross_total_usd) > 0.01 else None
     )
 
+    # Apply survivorship-bias haircut per server-team convention
+    # (PR #1 issuecomment-4472966936). The haircut is a derate on EXPECTED
+    # forward performance, not a re-statement of historical realized P&L.
+    # The standard convention from that comment table is:
+    #   haircut_sharpe = raw_sharpe × (1 - haircut)
+    #   haircut_pnl    = raw_pnl × (1 - haircut)
+    # Note: scaling per-trade P&L doesn't change the Sharpe of that scaled
+    # series (mean and std both scale). The Sharpe-level scaling is the
+    # SEPARATE expected-forward adjustment; it's what the platform applies
+    # at ingest. We compute both for transparency.
+    haircut = max(0.0, min(1.0, args.survivorship_haircut_pct))
+    haircut_adjusted = enriched.with_columns(
+        haircut_pct=pl.lit(haircut * 100.0),
+        net_pnl_pct_after_haircut=pl.col("net_pnl_pct") * (1.0 - haircut),
+        net_pnl_usd_after_haircut=pl.col("net_pnl_usd") * (1.0 - haircut),
+    )
+    haircut_path = out_dir / "signals_haircut_adjusted.parquet"
+    haircut_adjusted.write_parquet(haircut_path)
+    print(f"  wrote {haircut_path}  (haircut={100*haircut:.1f}%)")
+
+    haircut_total_usd = net_total_usd * (1.0 - haircut)
+    haircut_sharpe = net_sharpe * (1.0 - haircut)  # platform-convention math
+    haircut_max_dd = net_max_dd  # drawdown not haircut-adjusted (it's a path property)
+
     summary = {
         "pipeline_step": PIPELINE_STEP,
         "signals_path": str(signals_path),
@@ -363,9 +396,17 @@ def main(argv: list[str] | None = None) -> int:
             "friction_pct_of_gross_pnl": friction_pct_of_gross_total,
             "friction_drag_per_trade_pct": total_friction_pct,
         },
+        "survivorship_haircut": {
+            "haircut_pct": haircut,
+            "net_pnl_usd_after_haircut": haircut_total_usd,
+            "net_sharpe_after_haircut": float(haircut_sharpe),
+            "max_drawdown_pct_after_haircut": float(haircut_max_dd),
+            "passes_gate_after_haircut": bool(haircut_sharpe >= GATE_MIN_NET_SHARPE),
+        },
         "gate": {
             "min_net_sharpe": GATE_MIN_NET_SHARPE,
             "passes_net_sharpe_gate": bool(net_sharpe >= GATE_MIN_NET_SHARPE),
+            "passes_net_sharpe_gate_after_haircut": bool(haircut_sharpe >= GATE_MIN_NET_SHARPE),
         },
         "wall_clock_s": round(time.perf_counter() - t0, 2),
     }
@@ -391,6 +432,8 @@ def main(argv: list[str] | None = None) -> int:
     print()
     gate_str = "PASS" if summary["gate"]["passes_net_sharpe_gate"] else "FAIL"
     print(f"  Gate (net_sharpe >= {GATE_MIN_NET_SHARPE}): {gate_str} (actual {net_sharpe:.3f})")
+    hc_gate_str = "PASS" if summary["gate"]["passes_net_sharpe_gate_after_haircut"] else "FAIL"
+    print(f"  Survivorship haircut ({100*haircut:.1f}%): net_pnl ${haircut_total_usd:,.0f}  sharpe {haircut_sharpe:.3f}  {hc_gate_str}")
     return 0
 
 
