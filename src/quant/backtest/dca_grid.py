@@ -146,6 +146,62 @@ VERSION_CONFIG = {
         "require_smi_buy": True,       # SMI cross required for 3% buy
         "require_fresh_flip": False,   # 3% doesn't need fresh flip
     },
+    # --- Phase 2b extensions (extrapolated from v1/v2/v3 patterns) ---
+    # v0.5: tighter scalper for low-vol regimes BELOW v1's gate.
+    # v4 / v5: extreme-vol scalpers ABOVE v3's gate.
+    # Non-overlapping ATR bands: v0.5 ∈ [0.5,1), v1 ∈ [1,2), v2 ∈ [2,4),
+    # v3 ∈ [4,8), v4 ≥ 8, v5 ≥ 10 (slower TF differentiates from v4).
+    0.5: {
+        "tp_pct": 0.005,
+        "sl_pct": 0.0025,
+        "native_tf_min": 1,            # 1m — finer timing for tight TP
+        "atr_pct_min": 0.5,
+        "atr_pct_max": 1.0,            # bounded so v0.5 strictly catches low-vol regime
+        "inner_ema": 75,
+        "inner_atr": 14,
+        "inner_atr_mult": 0.5,
+        "slow_tf_mult": 2,
+        "slow_ema": 75,
+        "stma_ema": 100,
+        "stma_atr": 10,
+        "stma_atr_mult": 0.5,
+        "require_smi_buy": False,
+        "require_fresh_flip": True,
+    },
+    4: {
+        "tp_pct": 0.04,
+        "sl_pct": 0.02,
+        "native_tf_min": 240,          # 4h, resampled from 60m
+        "atr_pct_min": 8.0,
+        "atr_pct_max": None,
+        "inner_ema": 75,
+        "inner_atr": 14,
+        "inner_atr_mult": 0.5,
+        "slow_tf_mult": 4,
+        "slow_ema": 75,
+        "stma_ema": 100,
+        "stma_atr": 10,
+        "stma_atr_mult": 0.5,
+        "require_smi_buy": True,
+        "require_fresh_flip": False,
+    },
+    5: {
+        "tp_pct": 0.05,
+        "sl_pct": 0.025,
+        "native_tf_min": 1440,         # 1d, resampled from 60m
+        "atr_pct_min": 10.0,
+        "atr_pct_max": None,
+        "inner_ema": 75,
+        "inner_atr": 14,
+        "inner_atr_mult": 0.5,
+        "slow_tf_mult": 4,
+        "slow_ema": 75,
+        "stma_ema": 100,
+        "stma_atr": 10,
+        "stma_atr_mult": 0.5,
+        "require_smi_buy": True,
+        "require_fresh_flip": False,
+    },
 }
 
 
@@ -185,12 +241,34 @@ def load_bars(snapshot_dir, symbol: str, interval_min: int,
               start_date: str, end_date: str) -> pd.DataFrame:
     """Load bars for a (symbol, interval) slice as pandas DataFrame.
 
-    First positional arg is the snapshot dir (Path or str) on the parquet
-    path. Caller is expected to swap their SQLite conn for a snapshot dir
-    when porting from the server-team variant.
+    If `intraday_{interval_min}m.parquet` exists in `snapshot_dir`, reads
+    directly from it. Otherwise falls back to the finest available source
+    (60m by default) and resamples up to the requested interval. The
+    resample fallback supports v4 (240m) / v5 (1440m) without explicit
+    fetches at those intervals.
     """
     snapshot_dir = Path(snapshot_dir)
-    df = _load_parquet(snapshot_dir, interval_min)
+    target_path = snapshot_dir / f"intraday_{interval_min}m.parquet"
+    if target_path.exists():
+        source_interval = interval_min
+        df = _load_parquet(snapshot_dir, source_interval)
+    else:
+        # Pick the finest available source ≤ interval_min that's on disk.
+        # Common case: target is 240 (4h) or 1440 (1d); 60m parquet exists.
+        candidates = [60, 15, 5, 1]
+        source_interval = next(
+            (c for c in candidates
+             if c <= interval_min and (snapshot_dir / f"intraday_{c}m.parquet").exists()),
+            None,
+        )
+        if source_interval is None:
+            raise FileNotFoundError(
+                f"No intraday parquet ≤ {interval_min}m found in {snapshot_dir}. "
+                f"Run `uv run scripts/pull_intraday.py --intervals {interval_min}` "
+                f"or ensure a finer-resolution parquet (e.g. 60m) is available."
+            )
+        df = _load_parquet(snapshot_dir, source_interval)
+
     end_bound = pd.to_datetime(end_date) + pd.Timedelta(days=1)
     mask = (df["symbol"] == symbol) & \
            (df["timestamp"] >= pd.to_datetime(start_date)) & \
@@ -199,6 +277,10 @@ def load_bars(snapshot_dir, symbol: str, interval_min: int,
     if sub.empty:
         return pd.DataFrame()
     sub = sub.set_index("timestamp").sort_index()
+
+    # Resample if we loaded a finer source than requested.
+    if source_interval < interval_min:
+        sub = resample(sub, interval_min)
     return sub
 
 
