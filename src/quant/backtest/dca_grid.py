@@ -173,7 +173,10 @@ def _load_parquet(snapshot_dir: Path, interval_min: int) -> pd.DataFrame:
             f"`uv run scripts/pull_intraday.py --interval {interval_min}` first."
         )
     df = pl.read_parquet(path).to_pandas()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    # Parquet stores timestamps as tz-aware UTC datetimes. Strip the tz to
+    # match the SQLite-era simulator which used naive timestamps; the sim
+    # logic doesn't care about UTC labeling, only relative ordering.
+    df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_localize(None)
     _PARQUET_CACHE[key] = df
     return df
 
