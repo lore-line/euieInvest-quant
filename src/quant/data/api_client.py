@@ -162,6 +162,48 @@ def fetch_ohlcv(
     return pl.read_parquet(BytesIO(r.content))
 
 
+def fetch_intraday(
+    *,
+    interval_min: int,
+    since: date | None = None,
+    until: date | None = None,
+    symbols: list[str] | None = None,
+) -> pl.DataFrame:
+    """``GET /api/v1/intraday`` as parquet → polars DataFrame.
+
+    Returns rows with columns ``symbol | timestamp | interval_min |
+    open | high | low | close | volume``. Timestamp is ISO 8601 with
+    'T' separator and milliseconds (e.g. ``2022-09-15T00:00:00.000Z``).
+
+    Parameters
+    ----------
+    interval_min:
+        Bar size in minutes. Required by the server (5, 15, 60, etc.).
+    since, until:
+        Date-bounded filter applied to the timestamp column. ``until``
+        is inclusive (server uses next-day-boundary semantics).
+    symbols:
+        Optional ticker filter. Same MAX as /ohlcv.
+
+    Consumed by ``quant.backtest.dca_grid`` via the puller
+    ``scripts/pull_intraday.py``.
+    """
+    params: dict[str, str] = {"format": "parquet", "interval_min": str(interval_min)}
+    if since is not None:
+        params["since"] = since.isoformat()
+    if until is not None:
+        params["until"] = until.isoformat()
+    if symbols:
+        if len(symbols) > _MAX_SYMBOLS_PER_REQUEST:
+            raise ValueError(
+                f"symbols list exceeds API max of {_MAX_SYMBOLS_PER_REQUEST} "
+                f"(got {len(symbols)})"
+            )
+        params["symbols"] = ",".join(symbols)
+    r = _get("/intraday", params=params, accept="application/vnd.apache.parquet")
+    return pl.read_parquet(BytesIO(r.content))
+
+
 def fetch_peer_groups() -> dict[str, list[str]]:
     """``GET /api/v1/peer-groups`` → ``{group_name: [symbol, ...]}``.
 
