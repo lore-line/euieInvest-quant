@@ -80,6 +80,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "or 'slow' (252d/180d/+25%).",
     )
     p.add_argument(
+        "--vol-confirm-mult", type=float, default=0.0,
+        help="Volume-confirmation multiplier: entry volume must be ≥ N × trailing-30d-avg. "
+             "0.0 = disabled (default). 1.5 = filter per server-team finding "
+             "(PR #1 issuecomment-4473629237).",
+    )
+    p.add_argument(
         "--position-size-usd", type=float, default=1000.0,
         help="Per-trade position size for paper-sim equity curve. Default $1000.",
     )
@@ -192,7 +198,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     t0 = time.perf_counter()
 
-    spec = SPECS[args.spec]
+    base_spec = SPECS[args.spec]
+    # If vol-confirm is requested, build a new spec with that mult, modified
+    # name suffix so out_dir + label column don't collide with the baseline run.
+    if args.vol_confirm_mult > 0.0:
+        from dataclasses import replace
+        spec = replace(
+            base_spec,
+            name=f"{base_spec.name}_vc{int(args.vol_confirm_mult * 10)}",
+            vol_confirm_mult=args.vol_confirm_mult,
+        )
+    else:
+        spec = base_spec
+
     features_path = _resolve(args.features)
     today = date.today().isoformat()
     out_dir = (

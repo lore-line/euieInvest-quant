@@ -49,6 +49,11 @@ class EquityMomentumSpec:
     Defaults align with PR #1 issuecomment-4473364135:
       fast: 60d entry breakout, +15% target over 60d hold
       slow: 252d entry breakout, +25% target over 180d hold
+
+    Per PR #1 issuecomment-4473629237 (server-team edge finding), the
+    `vol_confirm_mult` field adds a volume-confirmation filter at entry
+    day: entry volume must be ≥ vol_confirm_mult × trailing-30d-avg.
+    Set to 0 (default) to disable for backwards-compat baseline runs.
     """
 
     name: str                       # "fast_g15" or "slow_g25"
@@ -57,6 +62,7 @@ class EquityMomentumSpec:
     target_pct: float               # gain threshold for is_winner label (decimal: 0.15 = 15%)
     min_entry_price_usd: float = 10.0
     min_avg_volume_30d_dollar: float = 10_000_000.0  # $10M ADV
+    vol_confirm_mult: float = 0.0    # 0 = disabled; 1.5 = entry volume ≥ 1.5× trailing-30d-avg
 
     def label_column(self) -> str:
         return f"is_equity_momentum_{self.name}"
@@ -161,6 +167,19 @@ def compute_equity_momentum_label(
     df = df.drop([f"_fwd_close_{i}" for i in range(1, H + 1)])
 
     # Step 4: composite label
+    # Volume confirmation: per server-team finding (vol-confirm = the unlock).
+    # Compute trailing-30d avg volume; require entry volume ≥ vol_confirm_mult ×
+    # that average. When vol_confirm_mult=0 the filter is disabled.
+    df = df.with_columns(
+        avg_volume_30d_shares=(
+            pl.col("volume").rolling_mean(window_size=30).over("symbol")
+        ),
+    )
+    vol_confirm_condition = (
+        pl.lit(True) if spec.vol_confirm_mult <= 0.0 else
+        (pl.col("volume") >= spec.vol_confirm_mult * pl.col("avg_volume_30d_shares"))
+    )
+
     label_col = spec.label_column()
     df = df.with_columns(
         **{
@@ -168,6 +187,7 @@ def compute_equity_momentum_label(
                 (pl.col("close_adj") >= spec.min_entry_price_usd)
                 & (pl.col("avg_dollar_volume_30d") >= spec.min_avg_volume_30d_dollar)
                 & (pl.col("close_adj") > pl.col("prior_n_day_high"))
+                & vol_confirm_condition
                 & (pl.col(fwd_col).is_not_null())
             )
             .then(pl.col(fwd_col) >= spec.target_pct * 100.0)
