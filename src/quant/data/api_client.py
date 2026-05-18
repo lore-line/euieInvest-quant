@@ -39,6 +39,7 @@ __all__ = [
     "ApiError",
     "fetch_anomaly_flags",
     "fetch_health",
+    "fetch_intraday",
     "fetch_ohlcv",
     "fetch_peer_groups",
     "fetch_snapshot_cursor",
