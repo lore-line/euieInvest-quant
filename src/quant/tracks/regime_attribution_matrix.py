@@ -61,6 +61,10 @@ STRATEGY_SOURCES = {
 # and stream_2c_grid_ungated; future strategies (stream_1_buffett, etc.) will be
 # added to this same file by server-team.
 SERVER_SIDE_FEED = Path("data/quant_publish/server_strategy_signals.parquet")
+# v0.6: per-day portfolio-return time series per strategy, for cross-strategy
+# daily-aggregation analysis. Auto-ingests when server team publishes.
+# Schema: strategy_id | date | daily_return_pct | open_deal_count | active_capital_pct
+SERVER_DAILY_FEED = Path("data/quant_publish/server_strategy_daily.parquet")
 
 # Server-side strategies not-yet-feeding (informational)
 SERVER_SIDE_PENDING = {
@@ -159,6 +163,71 @@ def load_p2_bull_trend_trades() -> pl.DataFrame:
         pl.col("net_pnl_pct"),
         pl.col("hold_days").cast(pl.Int64),
     ])
+
+
+def load_server_daily_feed() -> pl.DataFrame:
+    """v0.6: load per-day portfolio-return time series.
+
+    Auto-no-ops if `server_strategy_daily.parquet` doesn't exist (gracefully
+    skip per-day analysis until server team publishes the daily feed).
+
+    Schema expected:
+        strategy_id | date | daily_return_pct | open_deal_count | active_capital_pct
+    """
+    if not SERVER_DAILY_FEED.exists():
+        return pl.DataFrame(schema={
+            "strategy_id": pl.String, "date": pl.Date,
+            "daily_return_pct": pl.Float64,
+            "open_deal_count": pl.Int64,
+            "active_capital_pct": pl.Float64,
+        })
+    raw = pl.read_parquet(SERVER_DAILY_FEED)
+    # Tolerate Datetime[UTC] -> Date cast, same as trade feed
+    if "date" in raw.columns and raw["date"].dtype != pl.Date:
+        raw = raw.with_columns(pl.col("date").cast(pl.Date))
+    return raw.sort(["strategy_id", "date"])
+
+
+def compute_per_day_per_regime(
+    daily: pl.DataFrame, regime_labels: pl.DataFrame,
+) -> pl.DataFrame:
+    """v0.6: per-(strategy, regime) DAILY-return aggregation.
+
+    Different lens than per-trade attribution:
+      - Per-trade: which trades worked, per regime that was active at entry
+      - Per-day:   what was the daily portfolio return on each regime-active day
+
+    Per-day is the right lens for capital-allocation simulators (combine
+    multiple strategies' daily returns into composite portfolio).
+    """
+    if daily.height == 0:
+        return pl.DataFrame()
+    rl = regime_labels.select(["date", "regime_label"])
+    joined = daily.join(rl, on="date", how="left")
+
+    rows = []
+    for (strategy_id, regime), sub in joined.group_by(["strategy_id", "regime_label"]):
+        sid = strategy_id if isinstance(strategy_id, str) else str(strategy_id)
+        reg = regime if isinstance(regime, str) else (str(regime) if regime is not None else "unlabeled")
+        rets = sub["daily_return_pct"].drop_nulls().to_list()
+        if len(rets) < 5:
+            continue  # too few days for meaningful aggregation
+        arr = np.array(rets)
+        cap = sub["active_capital_pct"].drop_nulls()
+        mean_cap = float(cap.mean()) if cap.len() > 0 else 0.0
+        rows.append({
+            "strategy_id": sid,
+            "regime_label": reg,
+            "n_active_days": len(rets),
+            "mean_daily_return_pct": float(arr.mean()),
+            "annualized_return_pct": float(arr.mean() * 252),
+            "daily_volatility_pct": float(arr.std()),
+            "daily_sharpe": float(arr.mean() / arr.std() * np.sqrt(252)) if arr.std() > 0 else 0.0,
+            "max_daily_loss_pct": float(arr.min()),
+            "mean_active_capital_pct": mean_cap,
+            "active_capital_weighted_return_pct": float(arr.mean() * mean_cap),
+        })
+    return pl.DataFrame(rows).sort(["strategy_id", "regime_label"])
 
 
 def per_trade_sharpe(net_pnls: list[float], holds: list[int]) -> float:
@@ -270,6 +339,32 @@ def main() -> None:
     PUBLISH_PATH.parent.mkdir(parents=True, exist_ok=True)
     matrix.write_parquet(PUBLISH_PATH)
     print(f"\n=== wrote {PUBLISH_PATH} ({matrix.height} rows) ===")
+
+    # v0.6: per-day aggregation (auto-skips if daily feed absent)
+    print("\n=== v0.6 per-day aggregation ===")
+    daily = load_server_daily_feed()
+    if daily.height == 0:
+        print(f"  [waiting] {SERVER_DAILY_FEED} not yet on publish surface")
+        print(f"  When server team publishes the daily-curve parquet, this re-run")
+        print(f"  auto-emits a per-day per-regime matrix at the schema:")
+        print(f"    strategy_id | regime_label | n_active_days | mean_daily_return_pct |")
+        print(f"    annualized_return_pct | daily_volatility_pct | daily_sharpe |")
+        print(f"    max_daily_loss_pct | mean_active_capital_pct | active_capital_weighted_return_pct")
+    else:
+        print(f"  loaded {daily.height} daily-return rows for "
+              f"{daily['strategy_id'].n_unique()} strategies")
+        daily_matrix = compute_per_day_per_regime(daily, regime_labels)
+        if daily_matrix.height > 0:
+            print(f"\n  per-day matrix: {daily_matrix.height} cells")
+            for r in daily_matrix.iter_rows(named=True):
+                print(f"    {r['strategy_id']:35s} {r['regime_label']:25s}  "
+                      f"n_days={r['n_active_days']:4d}  "
+                      f"annual={r['annualized_return_pct']:+7.2f}%  "
+                      f"sharpe={r['daily_sharpe']:+6.2f}  "
+                      f"cap_wt_ret={r['active_capital_weighted_return_pct']:+6.3f}%/day")
+            daily_publish = Path("data/quant_publish/strategy_regime_daily_matrix.parquet")
+            daily_matrix.write_parquet(daily_publish)
+            print(f"\n  wrote {daily_publish}")
 
     # Multi-strategy framework summary — use comparable_yield_pct (cross-class-safe)
     # instead of Sharpe (TP-clustered classes inflate to +50, dwarfs realistic
