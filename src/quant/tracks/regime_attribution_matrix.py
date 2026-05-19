@@ -252,24 +252,28 @@ def load_multi_strategy_policies() -> pl.DataFrame:
 
 
 def compute_policy_summary(policy_df: pl.DataFrame) -> pl.DataFrame:
-    """v0.7: per-policy CAGR + daily Sharpe + max-DD + transition count.
+    """v0.7.1: per-policy CAGR + daily Sharpe + max-DD + transition count.
 
-    For the BTC-rotation thesis validation, the key comparison is:
-      baseline_inverse_aggressive       → ~+50% canonical (917-day labeled window)
-      inverse_aggressive_plus_btc_rotation → expected +55-58% per
-                                             v0.6 daily matrix math
+    CRITICAL FIX (v0.7.1): CAGR now uses CALENDAR-ELAPSED time, not row count.
+    Earlier v0.7 used `(eq_end/eq_start)^(365/n_rows) - 1` which assumed
+    n_rows == calendar days. But the harness output is weekday-keyed (917 rows
+    over 1336 calendar days = 3.66 years vs 2.51 from naive 917/365). This
+    over-stated CAGR by ~1.46× and produced the +50.06% / +54.89% numbers
+    that ran for a few rounds before server-team caught it.
 
-    CAGR formula: uses harness-emitted `equity` column directly (ground truth)
-    with annualization factor 365/n_rows (matches server-team convention:
-    crypto markets are 24/7, sim-day-as-trading-day). Daily Sharpe uses 365
-    for consistency with the same 365-day-year assumption.
+    Correct formula:
+      calendar_years = (max_date - min_date).days / 365.25
+      cagr = (eq_end / eq_start)^(1/calendar_years) - 1
+
+    Daily Sharpe still uses sqrt(N) where N = rows-per-year. For weekday-keyed
+    labels with ~252 trading days observed per calendar year, that's sqrt(252).
+    (Per server-team commit fixing the same bug bidirectionally.)
     """
     if policy_df.height == 0:
         return pl.DataFrame()
     rows = []
     has_equity = "equity" in policy_df.columns
     for keys, sub in policy_df.group_by("policy_id"):
-        # polars group_by returns tuple keys even when grouping by single col
         policy_id = keys[0] if isinstance(keys, tuple) else keys
         sub = sub.sort("date")
         rets = sub["daily_return_pct"].drop_nulls().to_list()
@@ -278,19 +282,28 @@ def compute_policy_summary(policy_df: pl.DataFrame) -> pl.DataFrame:
         arr = np.array(rets)
         n_days = len(rets)
 
-        # CAGR: prefer harness equity column (ground truth) over daily-return
-        # compounding (which can drift on FP rounding for long runs)
+        # CAGR cumulative — prefer harness equity column (ground truth)
         if has_equity:
             eq = sub["equity"].to_list()
             eq_start, eq_end = float(eq[0]), float(eq[-1])
             cumulative = eq_end / eq_start
         else:
             cumulative = float(np.prod(1 + arr / 100.0))
-        # 365/n_rows annualization (crypto 24/7 convention, server-team standard)
-        cagr_pct = (cumulative ** (365.0 / n_days) - 1.0) * 100.0
 
-        # Daily Sharpe with 365-day-year annualization (crypto convention)
-        sharpe = (float(arr.mean()) / float(arr.std()) * np.sqrt(365)
+        # Calendar-elapsed years (the right annualization period)
+        date_min = sub["date"].min()
+        date_max = sub["date"].max()
+        if hasattr(date_max, "date"):  # Datetime → Date conversion robust
+            calendar_days = (date_max - date_min).days
+        else:
+            calendar_days = (date_max - date_min).days
+        calendar_years = max(calendar_days / 365.25, 1e-6)
+
+        cagr_pct = (cumulative ** (1.0 / calendar_years) - 1.0) * 100.0
+
+        # Daily Sharpe — empirical rows-per-year for this dataset
+        rows_per_year = n_days / calendar_years
+        sharpe = (float(arr.mean()) / float(arr.std()) * np.sqrt(rows_per_year)
                   if arr.std() > 0 else 0.0)
 
         # Max drawdown — use harness equity if available, else reconstruct
@@ -313,12 +326,14 @@ def compute_policy_summary(policy_df: pl.DataFrame) -> pl.DataFrame:
         rows.append({
             "policy_id": str(policy_id),
             "n_days": n_days,
+            "calendar_years": calendar_years,
+            "rows_per_year": rows_per_year,
             "total_return_pct": (cumulative - 1.0) * 100.0,
             "cagr_pct": cagr_pct,
             "daily_sharpe": sharpe,
             "max_drawdown_pct": max_dd,
             "n_transitions": transitions,
-            "annual_transitions": float(transitions * 365 / max(n_days, 1)),
+            "annual_transitions": float(transitions / max(calendar_years, 1e-6)),
         })
     return pl.DataFrame(rows).sort("cagr_pct", descending=True)
 
