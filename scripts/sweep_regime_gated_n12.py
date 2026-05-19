@@ -65,6 +65,7 @@ BASE_PARAMS = {
 
 GATING_PROFILES = {
     "ungated": None,  # baseline — sim's regime gate disabled
+    # --- Conventional ("pause in bad regimes") gating — empirically loses CAGR ---
     "conservative": {
         "bear_trend": 0.0,
         "choppy_recovery": 1.0,
@@ -72,18 +73,35 @@ GATING_PROFILES = {
         "steady_bull": 1.0,
         "unknown": 1.0,
     },
-    "aggressive": {
-        "bear_trend": 0.0,
+    # --- Partial gating (bear=0.5) per follow-up #1 ---
+    "partial_bear_half": {
+        "bear_trend": 0.5,
         "choppy_recovery": 1.0,
         "sideways_range": 1.0,
-        "steady_bull": 1.5,
+        "steady_bull": 1.0,
         "unknown": 1.0,
     },
-    "ultra_aggressive": {
-        "bear_trend": 0.0,
+    # --- Inverse gating per consumer-team's HIGH-priority recommendation ---
+    # DCA harvests drawdowns: amplify during bear (cheap entries), reduce during steady_bull
+    "inverse_mild": {
+        "bear_trend": 1.5,
+        "choppy_recovery": 1.0,
+        "sideways_range": 1.0,
+        "steady_bull": 0.5,
+        "unknown": 1.0,
+    },
+    "inverse_aggressive": {
+        "bear_trend": 2.0,
+        "choppy_recovery": 1.0,
+        "sideways_range": 1.0,
+        "steady_bull": 0.0,
+        "unknown": 1.0,
+    },
+    "inverse_max": {
+        "bear_trend": 2.0,
         "choppy_recovery": 1.5,
         "sideways_range": 1.0,
-        "steady_bull": 2.0,
+        "steady_bull": 0.0,
         "unknown": 1.0,
     },
 }
