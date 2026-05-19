@@ -1,121 +1,106 @@
-# Continuity prompt — 2026-05-19 session wrap
+# Continuity prompt — 2026-05-19 session wrap (PM, post-Path-A-validation)
 
-**Session length:** ~24h, started ~04:00Z 2026-05-18 (P1 handoff acceptance), ending ~14:50Z 2026-05-19.
-**Repo:** lore-line/euieInvest-quant on heaven-pc `D:\repos\euieInvestDeepLearn`
-**Companion repo:** lore-line/euieInvest (server-team, the SvelteKit + DCA simulator + harness side)
-**Last commit:** e2dbfd8 (matrix refresh after v0.6 label switch)
+**Session continuation:** picked up ~14:50Z 2026-05-19 from morning wrap, continued through ~17:15Z. This document supersedes the morning version.
+**Repo:** lore-line/euieInvest-quant on heaven-pc `D:\repos\euieInvest-quant` (renamed today from `D:\repos\euieInvestDeepLearn`)
+**Companion repo:** lore-line/euieInvest (server-team, SvelteKit + DCA simulator + harness + Paper UI)
+**Last commit (consumer):** 1263de3 (publish: C-heuristic full-history labels for Conservative diagnostic)
 
-## Where things stand
+## Where things stand (PM update)
 
-### Production deployment tiers (validated)
+### Production deployment tiers — FULLY VALIDATED via 2018-extension retention test
 
-| Tier | Policy | CAGR uplift vs ungated | Sharpe | MaxDD | Status |
-|---|---|---:|---:|---:|---|
-| **Conservative** | `ungated_plus_bear_inv` | **+1.31pp** | 13.40 | -0.1% | ✅ Fully WF-OOS-validated, deploy-ready |
-| **Balanced** | `all_in_one_frac_sqrt_05` | +30.29pp | 5.34 | -6.5% | ⏳ Bears validated, SB rules pending 2018-extension |
-| **Aggressive** | `all_in_one_sb50` | +63.57pp | 4.11 | -9.5% | ⏳ Same caveat as Balanced |
+The 2018-extension landed at ~15:56Z with 83-89% retention on Balanced/Aggressive (>>60% threshold), invalidating the parameter-foresight asterisk. Then α-vs-SPY full-history rerun (using my fullhistory labels) confirmed deployable α on the same tiers across multiple bear regimes.
 
-All numbers from harness on `hybrid_AbearCstrictcontinuous_v06bear_regime_labels.parquet` (my v0.6 honest bears + C's continuous-confidence steady_bull). Continuous-confidence retained 95-97% of in-sample uplift WF-OOS, but C's threshold parameters were tuned on the 2022-2024 evaluation window — that's parameter-foresight, validated only when the 2018-extension lands and retest holds.
+| Tier | α-vs-SPY | IR | MaxDD | Status |
+|---|---:|---:|---:|---|
+| **tier 0 (baseline ungated DCA)** | **+28.93pp** | **1.03** | **-0.20%** | ✅ Production floor — captures Conservative use case without overlay |
+| tier 1 (inverse_aggr solo) | +27.18pp | 0.97 | -0.20% | Live paper |
+| tier 1' (`ungated_plus_bear_inv`) | +28.91pp | 1.03 | -0.20% | ⚠ EXPERIMENTAL — collapsed in extended-state test (+1.31pp → +0.02pp), mechanism observation only |
+| tier 2c (`all_in_one_regime_allocator` on v0.6 labels) | n/a | n/a | n/a | ⚠ EXPERIMENTAL — superseded by tier 2d/2e on continuous-conf labels |
+| **tier 2d (`all_in_one_frac_sqrt_05`, Balanced)** | **+86.60pp** | **2.09** | **-11.31%** | ✅ Production sweet spot |
+| **tier 2e (`all_in_one_sb50`, Aggressive)** | **+158.44pp** | **2.39** | **-21.38%** | ✅ CAGR-max |
+| **tier 3a (`cross_asset_buffett_with_bear_dca`)** | **+94.10pp** | **2.50** | **-23.57%** | ✅ Live paper, **PT-pending** (Buffett survivorship-bias caveat) — HIGHEST IR of session |
+| Stream 1b (252d Donchian equity) | n/a | n/a | n/a | Live paper, warming, 30-60 days for steady_bull cell n≥20 |
+| Stream 2a (60d Donchian equity, fast) | n/a | n/a | n/a | Live paper, warming, first scan emitted 9 breakouts |
 
-### Paper-trade roster live (7 strategies, $20K seed each, daily cron 00:30-00:50 UTC)
+All numbers from harness on `heuristic_strict_continuous_fullhistory_regime_labels.parquet` (my new full-history extension) + the existing v0.6 labels for tier 1'/2c.
 
-Server-team-run. Paper-start 2026-05-19 (today). Daily ntfy notifications to topic `lore-line-euieinvest-d9794ae20cfc`.
+### Paper-trade roster — 9 strategies live, first telemetry day tomorrow
 
-- tier 0 (ungated DCA baseline)
-- tier 1 (inverse_aggressive solo)
-- tier 1' (`ungated_plus_bear_inv`, Conservative)
-- tier 2c (`all_in_one_regime_allocator` on v0.6 labels, original variant)
-- tier 2d (NEW: `all_in_one_frac_sqrt_05` on v0.6-bear-substituted hybrid labels, Balanced)
-- tier 2e (NEW: `all_in_one_sb50` on v0.6-bear-substituted hybrid labels, Aggressive)
-- Stream 1b (252d Donchian, equity)
+Server-team-run. Daily cron sweep order: 00:30 (tier0) → 00:32 (tier1) → 00:38 (tier1'/2c/2d/2e) → 00:45 (1b) → 00:47 (2a) → 00:48 (tier3a) → 00:50 (snapshot). ntfy notifications to `lore-line-euieinvest-d9794ae20cfc`. **Tomorrow's 00:30-00:50 UTC sweep is the first real telemetry day.**
 
-## Open work / awaiting
+## New findings from PM session
 
-### Awaiting server team
+1. **Conservative tier (`ungated_plus_bear_inv`) is FTX/Luna-window-specific, not a mechanism failure.** Per α-vs-SPY 7.7y rerun, tier 1' delivers +28.91pp α (IR 1.03) — essentially IDENTICAL to baseline tier 0 (+28.93pp). The bear-amplification overlay adds zero net of baseline across 2018, COVID, 2022 bears. Conclusion: the +1.31pp in-sample uplift was real but window-narrow (76% of value from Q4 2022 per the earlier per-episode analysis). **Production framing**: tier 0 captures the Conservative-deploy use case; no regime overlay needed for that risk tier.
 
-1. **2018-extension daily feed** — server team's backfilling crypto 5m/15m/60m bars to 2017-08-17 for the harness to re-run on a longer window. Already running (~60-90min ETA from ~14:00Z). When it lands, the harness re-runs against the existing v0.6 labels but on the extended daily feed → tests whether the bear-amplification mechanism holds across multiple bears (2018, 2020 COVID, 2022 FTX) instead of just the 2022 FTX/Luna 40-day episode. The FTX concentration is 76% of inverse-gating's value per their per-episode analysis — extending the window de-risks this.
+2. **Cross-asset diversification is the strongest finding of the session.** `cross_asset_buffett_with_bear_dca` (Buffett by default, crypto DCA during bear, BTC long during high-conf steady_bull) posted highest IR of any tested policy (2.50). Mechanism: asymmetric diversification — Buffett -42% in 2022 while crypto baseline +23% (TP-clustering on bear chop). Crypto-as-bear-protector for equity portfolio is structurally cleaner than within-asset regime overlays. Magnitude is conditional on Buffett survivorship-bias correction; forward telemetry with point-in-time scores will settle the number.
 
-2. **Harness retest on hybrid v0.6-bear labels + the FULL extended-2018 daily feed** — the parameter-foresight validation for C's heuristic. If +63pp / +30pp survive on the longer window, Balanced/Aggressive tiers go from ⏳ to ✅. If they degrade meaningfully, only Conservative stays deploy-ready.
+3. **COVID structural resistance**: every tier had ≤6.5% MaxDD during COVID 2020-03 while SPY lost -33.72%. The DCA-grid's Supertrend+ATR entry conditions don't fire during violent flash crashes — strategy was mostly in cash. The strategy class is **structurally bear-resistant** without needing explicit regime classification. Suggests the regime classifier's marginal value is "alpha-source rotation" (steady_bull BTC), not "defensive overlay."
 
-3. **C-heuristic script publish** — I asked for `scripts/build-heuristic-regime-labels.py` (or equivalent) on the consumer-accessible surface so I can do consumer-side LOO validation as a complementary test. They haven't replied yet.
+4. **Mechanical Buffett comparison + "9×" headline correction.** Top-15-by-current-composite-score posts +3.28pp α (IR 0.36) over 5y. Quant baseline beats by ~9× on α, ~200× on drawdown. BUT: composite_score is current snapshot → survivorship bias on stock selection. Direction holds (quant > Buffett), magnitude is conditional. Fair comparison would be Stream 1 live TFSA realized returns (only 81 days of `portfolio_history` available so far — wait for accumulation). Doctrine §9.5 now reads direction-preserved/magnitude-qualified.
 
-### Pending consumer-side (low priority)
+5. **Gap-fade hypothesis REJECTED.** 12,347 trades over 7.7y, 33.3% win rate, -2.92% mean P&L, stops 2× more than targets. 3% weekend dips don't mean-revert — they extend. Hypothesis is empirically dead. Documented so it doesn't get relitigated.
 
-1. **P1 v0.7 with continuous output** — optional. Pivot `p_steady_bull` as direct regime_confidence for a "ML-continuous vs heuristic-continuous" comparison. ~30 min if needed.
+6. **α-vs-SPY is now permanent** in harness output (`policy_metrics()` computes `spy_cagr_pct`, `alpha_vs_spy_pp`, `information_ratio` per policy). Doctrine §9.5 references α-vs-SPY as the primary deployment metric.
 
-2. **Per-symbol regime classifier** — research direction queued. ~2-3 hr work. Would unblock per-symbol regime gating (currently impossible because P1 labels are market-wide). Only do if server team explicitly asks OR if 2018-extension result motivates it.
+7. **My full-history regenerator** (`scripts/ops/regenerate_heuristic_labels_sidecar.py`) validated to 100% byte-match canonical `heuristic_strict_continuous_regime_labels.parquet` with `--canonical-strict` + matching warmup window. Parameterized to take threshold dicts as args — sweep-ready for LOO Path B if v0.7 ever needs threshold re-tuning. Plan parked in `scripts/ops/LOO_CANDIDATE_PLAN.md`.
 
-3. **GPU neural net classifier** — long-shot. AUC ceiling is 0.537 per server team's analysis. RTX 5090 makes it cheap to try but EV is low. Defer.
-
-4. **Stream 1b paper-trade telemetry analyzer** — 30-60 days forward to accumulate n>=20 steady_bull entries for the +1.467 Sharpe cell to graduate from medium-conf to high-conf. Just watch over time.
-
-## Key data on the publish surface (`data/quant_publish/`)
-
-- `regime_labels_v1.parquet` — v0.4 in-sample-foresight labels (KEEP for reference, DO NOT use for new analyses)
-- `regime_labels_v1_walkforward.parquet` — v0.5 WF-OOS labels (limited window 2023-2026)
-- `regime_labels_v2.parquet` — v0.6 WF-OOS labels (extended 2018-08→2026-05, 1888 days, 220 bear) ← **CURRENT BEST**
-- `hybrid_AbearCstrictcontinuous_v06bear_regime_labels.parquet` — server-team's best in-sample variant with v0.6 bears substituted
-- `strategy_regime_sharpe_matrix.parquet` — P3 v0.8 per-trade attribution matrix (now on v0.6 labels)
-- `strategy_regime_daily_matrix.parquet` — P3 v0.6+ per-day matrix
-- `multi_strategy_policy_summary.parquet` — harness output summary
-- `stream_2b_daily.parquet` — equity-side daily curve (NEW, just published)
-- `server_strategy_signals.parquet` — server-team strategy trade feeds (combined: 2c grids + 1b momentum)
-- `server_strategy_daily.parquet` — server-team DCA grid daily curves
-- `multi_strategy_policies.parquet` + `*_walkforward.parquet` + `*_v06.parquet` — harness raw outputs
-- `equity_slow_universe_v1.parquet` — published universe filter (1491 symbols, R1000-ish)
+8. **Carry-forward findings #1-7 from morning wrap** (capital allocation, FTX/Luna concentration, per-day oracle ceiling, bear-pause categories, horizon-dependence, Stream 1b standout, regime labels concurrent-state) still stand.
 
 ## Doctrine status (lore-line/euieInvest:docs/four-stream-doctrine-v1.md §9.5)
 
-State-of-section audit table with each claim tagged ✅ deployable / ⏳ pending / ❌ retracted. Server team maintains. Recent changes:
-- ❌ Retracted: +5.93pp BTC-rotation in-sample (was v0.4 leaky-labels artifact)
-- ✅ Validated: bear-amplification mechanism is real (+1.31pp / +2.33pp on v0.6 honest labels)
-- ⏳ Pending: continuous-confidence +30/+63pp (waiting on 2018-extension)
-- ✅ New: 3-category implicit/explicit bear-pause framework
-- ✅ New: fractional-allocation strictly dominates binary-threshold at equivalent CAGR
-- ✅ New: regime labels are concurrent-state indicators, NOT lead indicators (B-oracle 7d went negative)
-
-## Mechanism findings worth keeping (won't be re-derived if context clears)
-
-1. **"Pure capital allocation, not signal quality"**: inverse_aggressive and ungated DCA have IDENTICAL per-trade pnl_pct across all regimes. The +1.99pp uplift is bigger position sizes during bear, not different trade decisions. P3 v0.6 per-day matrix proved this cell-by-cell.
-
-2. **FTX/Luna concentration**: 76% of inverse-gating's WF-OOS value comes from Episode 0 (40 days, Sep-Dec 2022). Per-bear analysis shows inverse-gating needs ≥15 contiguous bear days to deploy + harvest. Short bear flickers are noise. → Future bears may not provide comparable amplification opportunity.
-
-3. **Per-day oracle ceiling**: max{ung, inv_aggr, btc, cash} per day = 1608% CAGR / Sharpe 12.28 → tier-0 ungated Sharpe (14.22) is HIGHER than oracle Sharpe (12.28). Standard portfolio theory (diversification improves Sharpe) breaks down when component strategies are TP-clustered. Variance from daily switching exceeds variance reduction from diversification.
-
-4. **Three categories of bear-pause behavior**:
-   - **Explicit** (DCA grid): always-fires; overlay REQUIRED to control regime exposure
-   - **Implicit + noisy bear-firing** (stream_2a 60d Donchian): self-pauses (48× suppression), residual bear trades are noise; overlay = NO-OP
-   - **Implicit + selective bear-firing** (stream_2b 252d Donchian): self-pauses (29× suppression) BUT bear-firing trades are relative-strength outliers at +17.32% mean (n=17); overlay = HARMFUL (removes high-quality trades)
-
-5. **Horizon-dependence in bear**: fast momentum (60d, stream_2a) loses -0.62 Sharpe in bear; slow momentum (180d, stream_2b) WINS +0.56 Sharpe in bear (180d horizon catches bear→recovery transitions). Doctrine §6.5.
-
-6. **Stream 1b steady_bull standout**: P3 matrix on honest labels shows stream_1b in steady_bull at Sharpe +1.467 / yield +91%/yr, n=12 medium-conf. Strongest realistic cell anywhere in the matrix. Slow Donchian (252d entry) + SMA + vol-confirm matches well to durable steady_bull regimes. Forward telemetry will confirm.
-
-7. **Regime labels concurrent-state, NOT lead-indicators**: B-oracle 7d (perfect 7-day foresight on labels) yielded NEGATIVE uplift (-0.39pp) vs current-state classifier (+2.93pp leaky / +0.66pp honest 1d-oracle). Don't build forecasting models on regime labels; entry timing is already at the information ceiling.
+Server team maintains. Recent updates:
+- ✅ Validated WF-OOS-extended-state: Balanced/Aggressive tiers (83-89% retention) with α-vs-SPY framing
+- ✅ Validated full-history: tier 0 baseline captures Conservative use case (+28.93pp α, IR 1.03)
+- ⚠ Tier 1'/2c relabeled EXPERIMENTAL — diagnostic intermediate, not deploy-eligible
+- ✅ New §9.5.x cross-asset diversification placeholder — mechanism captured, magnitude pending forward telemetry
+- ⚠ Buffett comparison softened — direction-preserved/magnitude-qualified pending Stream 1 realized-return data
+- ❌ Gap-fade hypothesis rejected (documented to prevent relitigation)
 
 ## Infrastructure state
 
-- **ntfy monitor active** (task `br8uanv2x`, persistent): subscribes to `lore-line-euieinvest-d9794ae20cfc`, parses incoming events via python script. Catches all PR/issue/comment/push activity on BOTH repos in real-time. Eliminates polling overhead. **Keep this armed on next session** (or re-arm if cleared).
-- **SSH from claudehost to heaven-pc**: working via Windows OpenSSH Server on port 22, `bash.exe` as DefaultShell. Tailscale 100.103.175.27 or LAN 192.168.1.16. Authorized keys: `euie@claudehost` and `euie@heaven-pc` in `C:\ProgramData\ssh\administrators_authorized_keys`.
-- **Sidecar API**: `http://100.68.86.56:8443/api/v1/ohlcv` (equity) and `/api/v1/intraday?symbol=X&interval_min=1440` (crypto extended). The intraday endpoint ignores start/end params; filter client-side.
+- **ntfy monitor active** (task `brdgluzrj`, persistent — replaces `br8uanv2x` from prior session): subscribes to `lore-line-euieinvest-d9794ae20cfc`, parses incoming events via `scripts/ops/ntfy_monitor.py`. Catches all PR/issue/comment/push activity on BOTH repos in real-time + paper-trade notifications. **Keep this armed on next session** (or re-arm with the same setup if cleared).
+- **Sidecar bug fixed in regenerator**: `/intraday` endpoint ignores `symbol=` query param and returns ALL 16 symbols (~1.6M rows). Client-side filter on `symbol == "BTC-USD"` is required. Codified in `scripts/ops/regenerate_heuristic_labels_sidecar.py`.
+- **SSH/Tailscale state unchanged** from morning wrap.
+- **Sidecar API**: `http://100.68.86.56:8443/api/v1/ohlcv` (equity) and `/api/v1/intraday?symbol=X&interval_min=1440` (crypto; ignores filters, see above).
+- **Local repo rename**: `D:\repos\euieInvestDeepLearn` → `D:\repos\euieInvest-quant` (today). Old folder `D:\repos\euieInvest-quant` (stale clone from May 12) was deleted before rename. Stale `D:\Nextcloud\LORELINE\CODE\euieInvestDeepLearn` empty placeholder still exists — if next Claude session is launched from that path, project memory dir keys to it (orphan path); relaunch from `D:\repos\euieInvest-quant` for consistent keying.
 
-## Resume directive
+## Resume directive (UPDATED 2026-05-19)
 
-User's directive: **"just work on whatever the server team assigns to you"** (no autonomous cron, interactive mode only). Engagement pattern: server team posts on PR #1 or issues #20/22, ntfy monitor wakes me, I read full body via `gh api`, respond substantively or execute the requested work.
+User directive: **"work autonomously, if you are uncertain, ask the server team, they are the lead on this project"**. Stronger than morning's "just work on whatever the server team assigns to you" — operate fully autonomously, INCLUDING commits/push without per-action confirmation. If uncertain about anything (technical, operational, scope), route via GitHub issue comment to server team — NOT to user via AskUserQuestion. User is in pure facilitation mode for this workstream.
 
-When picking back up:
-1. **Check the latest 3 comments on issue #20 + #22** first to see if there's pending server-team activity
-2. **Check `pgrep -af python` on WSL** to see if any of their long-running work finished
-3. **Pull the repo** to get latest commits
-4. **If 2018-extension daily feed landed**: re-run my P3 matrix on the extended data; post the comparison to issue #22
-5. **If C-heuristic script is published**: do the LOO param validation for the parameter-foresight asterisk
-6. **Otherwise**: hold for direction; the deployment tier framework is settled, paper-trade is harvesting telemetry, no urgent work pending
+Engagement pattern: ntfy monitor wakes me on events, I read full body via `gh api`, respond substantively if there's something to add, execute autonomously if there's work to do.
+
+## When picking back up
+
+1. **Check today's paper-trade telemetry first** — 00:30-00:50 UTC sweep is the first real data day. 9 strategies × 1 day = 9 daily-return data points. Look for: did all strategies log? any anomalies? does tier 3a's first live day track the backtest expectation?
+2. **Check #22 + #20 latest comments** for server-team activity since the wrap (should be quiet — they wrapped too)
+3. **Pull repo** for any commits since `1263de3`
+4. **Default action**: hold for direction unless something landed. The doctrine is stable, paper-trade is harvesting, no urgent work pending.
+
+## Open work / awaiting
+
+### Awaiting (no my-side work needed)
+
+- **Forward telemetry on 9-strategy roster** — accumulating from tomorrow's first cron sweep. 30 days to validate Balanced/Aggressive standalone α. 30+ days for cross-asset rotator point-in-time magnitude. 30-60 days for Stream 1b steady_bull cell to graduate medium→high confidence.
+- **Stream 1 portfolio_history accumulation** — only 81 days currently. Need more for the fair "Stream 1 live realized vs quant baseline" comparison that would settle the Buffett magnitude.
+
+### Pending consumer-side (low priority)
+
+1. **P1 v0.7 with continuous output** — optional pivot. Pivot `p_steady_bull` as direct regime_confidence for ML-continuous vs heuristic-continuous comparison. ~30 min if needed.
+2. **LOO param validation** — parked at confirmatory (not blocking). Re-arm only if v0.7 needs threshold re-tuning. Regenerator + plan are hot at `scripts/ops/regenerate_heuristic_labels_sidecar.py` + `scripts/ops/LOO_CANDIDATE_PLAN.md`.
+3. **Per-symbol regime classifier** — research direction. ~2-3 hr work. Defer unless server team asks OR a specific finding motivates it.
+4. **GPU neural net classifier** — long-shot. AUC ceiling 0.537 per server team. Defer.
 
 ## Things explicitly NOT to do
 
-- Don't re-derive findings #1-7 above; they're stable doctrine
+- Don't re-derive findings #1-8 above (stable doctrine)
 - Don't propose forecasting models on regime labels (B-oracle 7d test killed that direction)
-- Don't build per-symbol classifier or GPU NN unless 2018-extension result motivates it
-- Don't change `regime_labels_v1.parquet` (v0.4 reference is preserved for comparison)
-- Don't re-run the N=34 multi-version sweep (was killed earlier, obsoleted by v0.6 work)
-- Don't deploy Balanced or Aggressive tiers as live capital until 2018-extension validates C's parameters
+- Don't build per-symbol classifier or GPU NN unless explicitly motivated
+- Don't change `regime_labels_v1.parquet` (v0.4 reference preserved for comparison)
+- Don't re-run the N=34 multi-version sweep (obsoleted by v0.6/2018-ext work)
+- Don't ship tier 1' or tier 2c as deploy candidates (EXPERIMENTAL only — diagnostic intermediate tiers)
+- Don't claim cross-asset rotator magnitudes (+94pp / IR 2.50) in doctrine without "PT-pending" caveat — survivorship-bias on Buffett selection until point-in-time forward telemetry accumulates
+- Don't write doctrine claims with magnitudes from survivorship-biased backtests — direction yes, magnitude only after forward telemetry confirms
+- Don't relitigate the gap-fade hypothesis (empirically rejected, 12347 trades, -2.92%/trade)
+- Don't ask the user for input on technical/operational/scope decisions — autonomy directive in effect, route to server team if uncertain
