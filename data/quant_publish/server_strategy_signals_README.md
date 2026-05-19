@@ -1,6 +1,15 @@
-## server_strategy_signals.parquet
+## server_strategy_signals.parquet + server_strategy_daily.parquet
 
-Per-trade P&L feed published by the **server team** (claudehost) for consumption by the P3 v0.4 regime attribution matrix builder.
+Two complementary feeds published by the **server team** (claudehost):
+
+- **`server_strategy_signals.parquet`** — per-trade P&L ledger for the P3 v0.4 per-trade attribution matrix
+- **`server_strategy_daily.parquet`** — per-day portfolio state for the P3 v0.6 daily aggregation matrix (capital-utilization-aware cross-class comparison)
+
+---
+
+## server_strategy_signals.parquet (per-trade)
+
+Per-trade P&L feed for the P3 v0.4 regime attribution matrix builder.
 
 ### Schema
 
@@ -67,5 +76,43 @@ Weekly refresh. Server-team will push a new revision after major doctrine config
 - Trade-export flag: `--export-trades-parquet` (added in commit `91d1c79`)
 
 Reference: issues #20 (inverse-gating result), #22 (publish schema agreement).
+
+---
+
+## server_strategy_daily.parquet (per-day)
+
+Per-day portfolio state for the P3 v0.6 daily aggregation matrix. Built from the simulator's equity curve (already populated per-bar) deduplicated to daily granularity, joined to closed_deals for per-day open-deal counts and active-capital%.
+
+### Schema
+
+| Column | Type | Notes |
+|---|---|---|
+| `strategy_id` | str | Same discriminator as in `server_strategy_signals.parquet`. |
+| `date` | datetime64[ns, UTC] | Calendar date (normalized to UTC midnight). |
+| `daily_return_pct` | float | `(equity_t / equity_{t-1} - 1) × 100`. First-day value is 0. |
+| `open_deal_count` | int | Number of deals open at end-of-day (across all symbols × versions). |
+| `active_capital_pct` | float | `sum(cost_basis_of_open_deals) / equity × 100`. Can exceed 100% as compounding grows open positions past starting capital. |
+
+### Currently published
+
+| `strategy_id` | n_days | Window | Source |
+|---|---:|---|---|
+| `stream_2c_grid_inverse_aggressive` | 1340 | 2022-09-15 → 2026-05-16 | DCA-grid sim, inverse_aggressive profile |
+| `stream_2c_grid_ungated` | 1340 | 2022-09-15 → 2026-05-16 | DCA-grid sim, baseline (no gating) |
+
+### What this unblocks
+
+The per-trade `Sharpe` is **not comparable across strategy classes** (TP-clustered DCA vs distributed-exit momentum — see "CRITICAL CAVEAT" in P3 v0.4.1 matrix README). The per-day matrix is the right cross-class comparator:
+
+- Per-day daily_return_pct is in the **same units** for every strategy (annualized portfolio return per regime, capital-utilization-aware via `active_capital_pct`)
+- Consumer-team's v0.6 matrix builder reads this parquet to compute per-regime daily Sharpe → directly comparable across strategy classes
+- Enables **wrapper × regime allocation decisions** without the Sharpe-inflation footgun
+
+### Source
+
+- Daily export: `--export-daily-parquet` flag in `scripts/backtest-crypto-dca-grid.py` (added in commit `939c271`)
+- Same simulator + config as the trades feed; same kraken_pro_dynamic friction model
+
+Reference: euieInvest-quant#22 v0.6 per-day aggregation contract.
 
 — server team
