@@ -14,12 +14,15 @@ Per-trade P&L feed published by the **server team** (claudehost) for consumption
 
 ### Published strategy rows
 
-| `strategy_id` | n_trades | Window | Source | Config |
-|---|---:|---|---|---|
-| `stream_2c_grid_inverse_aggressive` | 9634 | 2022-09-15 → 2026-05-16 | simulator | Doctrine §9.5 production profile: bear=2.0×, choppy=1.0×, sideways=1.0×, steady_bull=0.0× |
-| `stream_2c_grid_ungated` | 10094 | 2022-09-15 → 2026-05-16 | simulator | AB-comparison baseline (no regime gating) |
+| `strategy_id` | n_trades | Window | Source | Sharpe class | Config |
+|---|---:|---|---|---|---|
+| `stream_2c_grid_inverse_aggressive` | 9634 | 2022-09-15 → 2026-05-16 | DCA-grid sim | tp_clustered | Doctrine §9.5: bear=2.0×, choppy=1.0×, sideways=1.0×, steady_bull=0.0× |
+| `stream_2c_grid_ungated` | 10094 | 2022-09-15 → 2026-05-16 | DCA-grid sim | tp_clustered | AB-comparison baseline (no regime gating) |
+| `stream_1b_momentum_donchian` | 194 | 2024-08-05 → 2026-05-15 | momentum backtest | realistic | 252d Donchian + SMA(50)>SMA(200) + vol-confirm 1.5× / stop 10% / target 40% / max-hold 120d / max-concurrent 20 |
 
-Both rows are produced by `scripts/backtest-crypto-dca-grid.py` in `lore-line/euieInvest` (server-team repo). Config matching doctrine §2.7 multi-version × N=12 sweet spot:
+DCA-grid rows are produced by `scripts/backtest-crypto-dca-grid.py`. Stream 1b row is from `scripts/backtest-momentum-portfolio.py --volume-confirm 1.5 --stop-pct 0.10 --target-pct 0.40 --max-hold-days 120 --max-concurrent 20 --vol-scaled-sizing`. Both in `lore-line/euieInvest` (server-team repo).
+
+DCA-grid config matching doctrine §2.7 multi-version × N=12 sweet spot:
 
 ```
 --all --symbols BTC-USD,ETH-USD,SOL-USD,ADA-USD,AVAX-USD,DOT-USD,LINK-USD,ATOM-USD,RUNE-USD,FET-USD,DOGE-USD,XRP-USD
@@ -42,6 +45,14 @@ Both deltas are within sim noise from OHLCV differences between the two database
 ### Cadence
 
 Weekly refresh. Server-team will push a new revision after major doctrine config changes (universe expansion, friction tier change, base_pct shift, etc.).
+
+### Stream 1b summary stats (backtest, 2024-08 → 2026-05)
+
+- 194 trades, 39.2% win rate (37.6% net of friction)
+- Mean per-trade pnl: +4.99%; median -10.24% (typical momentum distribution — wide right tail from 40% targets)
+- Mean hold: 57 days (matches doctrine §1b spec)
+- CAGR: +37.81%; Sharpe (portfolio, not per-trade): 2.178; Max DD: -17.1%
+- `sharpe_class = "realistic"` — distributed exits, directly comparable to consumer-side stream_2a/2b
 
 ### Deferred / not yet published
 
