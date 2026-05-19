@@ -56,14 +56,17 @@ STRATEGY_SOURCES = {
     ),
 }
 
-# Server-side strategy P&L feeds we'd consume if available
-# (TODO: server-team publishes these to their `data/quant_publish/` analog)
-SERVER_SIDE_STUBS = {
-    "stream_1_buffett":            "data/quant_publish/buffett_signals.parquet (TODO)",
-    "stream_2c_grid":              "data/quant_publish/dca_grid_signals.parquet (TODO)",
-    "stream_2c_grid_inverse_aggr": "data/quant_publish/dca_grid_inverse_aggressive_signals.parquet (TODO)",
-    "stream_3_hype":               "data/quant_publish/hype_signals.parquet (TODO)",
-    "stream_4_scalping":           "data/quant_publish/scalping_signals.parquet (TODO)",
+# Server-side strategy P&L feed (combined parquet with `strategy_id` discriminator,
+# published per issue #22 contract). v0.4.1 ingests stream_2c_grid_inverse_aggressive
+# and stream_2c_grid_ungated; future strategies (stream_1_buffett, etc.) will be
+# added to this same file by server-team.
+SERVER_SIDE_FEED = Path("data/quant_publish/server_strategy_signals.parquet")
+
+# Server-side strategies not-yet-feeding (informational)
+SERVER_SIDE_PENDING = {
+    "stream_1_buffett": "deferred — needs FIFO matching against pre-tracking holdings",
+    "stream_3_hype":    "doesn't exist yet (paper-only spec)",
+    "stream_4_scalping": "doesn't exist yet (collapsed into Stream 2)",
 }
 
 
@@ -107,6 +110,31 @@ def load_consumer_side_trades() -> pl.DataFrame:
             "net_pnl_pct": pl.Float64, "hold_days": pl.Int64,
         })
     return pl.concat(frames, how="vertical")
+
+
+def load_server_side_feed() -> pl.DataFrame:
+    """Load + normalize server-side strategy P&L from combined parquet.
+
+    Server schema uses Datetime[UTC] for entry/exit dates; we cast to Date
+    to match the consumer-side schema for cell-level join consistency.
+    """
+    if not SERVER_SIDE_FEED.exists():
+        print(f"  [warn] server feed not at {SERVER_SIDE_FEED}")
+        return pl.DataFrame(schema={
+            "strategy_id": pl.String, "entry_date": pl.Date,
+            "net_pnl_pct": pl.Float64, "hold_days": pl.Int64,
+        })
+    raw = pl.read_parquet(SERVER_SIDE_FEED)
+    norm = raw.select([
+        pl.col("strategy_id"),
+        pl.col("entry_date").cast(pl.Date),
+        pl.col("net_pnl_pct"),
+        pl.col("hold_days").cast(pl.Int64),
+    ])
+    for sid in norm["strategy_id"].unique().to_list():
+        n = norm.filter(pl.col("strategy_id") == sid).height
+        print(f"  {sid}: {n} trades (server feed)")
+    return norm
 
 
 def load_p2_bull_trend_trades() -> pl.DataFrame:
@@ -188,18 +216,22 @@ def compute_matrix(trades: pl.DataFrame, regime_labels: pl.DataFrame) -> pl.Data
 def main() -> None:
     print("=== P3 v0.4 — regime-conditional strategy attribution matrix ===\n")
 
-    print("[1/3] loading consumer-side strategy trades...")
+    print("[1/4] loading consumer-side strategy trades...")
     consumer_trades = load_consumer_side_trades()
     print(f"      {consumer_trades.height} trades across {consumer_trades['strategy_id'].n_unique()} strategies")
 
-    print("\n[2/3] computing P2 v0.4 bull-trend trades in-memory...")
+    print("\n[2/4] computing P2 v0.4 bull-trend trades in-memory...")
     p2_trades = load_p2_bull_trend_trades()
     print(f"      {p2_trades.height} P2 trades")
-    all_trades = pl.concat([consumer_trades, p2_trades], how="vertical")
-    print(f"      total: {all_trades.height} trades, "
+
+    print("\n[3/4] loading server-side P&L feed...")
+    server_trades = load_server_side_feed()
+
+    all_trades = pl.concat([consumer_trades, p2_trades, server_trades], how="vertical")
+    print(f"\n      grand total: {all_trades.height} trades across "
           f"{all_trades['strategy_id'].n_unique()} strategies")
 
-    print("\n[3/3] loading P1 v0.4 regime labels + computing matrix...")
+    print("\n[4/4] loading P1 v0.4 regime labels + computing matrix...")
     regime_labels = pl.read_parquet(REGIME_LABELS_PATH)
     matrix = compute_matrix(all_trades, regime_labels)
     print(f"      matrix: {matrix.height} cells (strategy × regime)")
@@ -217,14 +249,10 @@ def main() -> None:
                   f"{r['median_pnl_pct']:+7.2f} {r['per_trade_sharpe']:+7.3f} "
                   f"{r['max_trade_loss_pct']:+8.2f} {r['confidence']:>6s}")
 
-    # Server-side gaps
-    print("\n=== SERVER-SIDE P&L FEEDS NEEDED FOR FULL MATRIX ===")
-    for sid, path_note in SERVER_SIDE_STUBS.items():
-        print(f"  {sid:35s}  {path_note}")
-    print("\n  Consumer-side cannot compute these cells without the server-team")
-    print("  publishing trade-level P&L parquets (same schema as our equity_momentum")
-    print("  signals.parquet — `strategy_id | entry_date | exit_date | net_pnl_pct |")
-    print("  hold_days`).")
+    # Server-side gaps still pending
+    print("\n=== SERVER-SIDE PENDING (not yet in feed) ===")
+    for sid, note in SERVER_SIDE_PENDING.items():
+        print(f"  {sid:35s}  {note}")
 
     # Publish
     PUBLISH_PATH.parent.mkdir(parents=True, exist_ok=True)
