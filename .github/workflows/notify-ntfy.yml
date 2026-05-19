@@ -1,0 +1,62 @@
+name: notify-ntfy
+
+on:
+  push:
+    branches: [main]
+  issues:
+    types: [opened, edited, closed, reopened]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [opened, closed, reopened]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to ntfy
+        env:
+          TOPIC: lore-line-euieinvest-d9794ae20cfc
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          EVENT: ${{ github.event_name }}
+          # Per-event-type fields passed via env (safe interpolation)
+          PUSH_MSG: ${{ github.event.head_commit.message }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_ACTION: ${{ github.event.action }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_ACTION: ${{ github.event.action }}
+        run: |
+          set -e
+          case "$EVENT" in
+            push)
+              TITLE="[$REPO] push by $ACTOR"
+              BODY="$PUSH_MSG"
+              ;;
+            issues)
+              TITLE="[$REPO] issue $ISSUE_ACTION by $ACTOR"
+              BODY="#$ISSUE_NUM $ISSUE_TITLE"
+              ;;
+            issue_comment)
+              TITLE="[$REPO] comment on #$ISSUE_NUM by $ACTOR"
+              BODY=$(echo "$COMMENT_BODY" | head -c 300)
+              ;;
+            pull_request)
+              TITLE="[$REPO] PR $PR_ACTION by $ACTOR"
+              BODY="#$PR_NUM $PR_TITLE"
+              ;;
+            *)
+              TITLE="[$REPO] $EVENT by $ACTOR"
+              BODY="(no body)"
+              ;;
+          esac
+          # Cap body at 1000 chars and write to file to avoid argv length issues
+          echo -n "$BODY" | head -c 1000 > /tmp/ntfy-body.txt
+          curl -sS -X POST \
+            -H "Title: $TITLE" \
+            -H "Tags: github" \
+            --data-binary @/tmp/ntfy-body.txt \
+            "https://ntfy.sh/$TOPIC"
