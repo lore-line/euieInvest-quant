@@ -65,6 +65,9 @@ SERVER_SIDE_FEED = Path("data/quant_publish/server_strategy_signals.parquet")
 # daily-aggregation analysis. Auto-ingests when server team publishes.
 # Schema: strategy_id | date | daily_return_pct | open_deal_count | active_capital_pct
 SERVER_DAILY_FEED = Path("data/quant_publish/server_strategy_daily.parquet")
+# v0.7: multi-strategy harness policy outputs (per (date, policy_id))
+# Schema: policy_id | date | daily_return_pct | active_strategy_id | active_capital_pct
+SERVER_POLICY_FEED = Path("data/quant_publish/multi_strategy_policies.parquet")
 
 # Server-side strategies not-yet-feeding (informational)
 SERVER_SIDE_PENDING = {
@@ -230,6 +233,72 @@ def compute_per_day_per_regime(
     return pl.DataFrame(rows).sort(["strategy_id", "regime_label"])
 
 
+def load_multi_strategy_policies() -> pl.DataFrame:
+    """v0.7: load multi-strategy harness policy outputs.
+
+    Auto-no-ops if `multi_strategy_policies.parquet` doesn't exist.
+    """
+    if not SERVER_POLICY_FEED.exists():
+        return pl.DataFrame(schema={
+            "policy_id": pl.String, "date": pl.Date,
+            "daily_return_pct": pl.Float64,
+            "active_strategy_id": pl.String,
+            "active_capital_pct": pl.Float64,
+        })
+    raw = pl.read_parquet(SERVER_POLICY_FEED)
+    if "date" in raw.columns and raw["date"].dtype != pl.Date:
+        raw = raw.with_columns(pl.col("date").cast(pl.Date))
+    return raw.sort(["policy_id", "date"])
+
+
+def compute_policy_summary(policy_df: pl.DataFrame) -> pl.DataFrame:
+    """v0.7: per-policy CAGR + daily Sharpe + max-DD + transition count.
+
+    For the BTC-rotation thesis validation, the key comparison is:
+      baseline_inverse_aggressive       → +47.18% canonical
+      inverse_aggressive_plus_btc_rotation → expected +55-75% per
+                                             v0.6 daily matrix math
+    """
+    if policy_df.height == 0:
+        return pl.DataFrame()
+    rows = []
+    for policy_id, sub in policy_df.group_by("policy_id"):
+        rets = sub["daily_return_pct"].drop_nulls().to_list()
+        if len(rets) < 30:
+            continue
+        arr = np.array(rets)
+        # CAGR from compounding daily
+        cumulative = float(np.prod(1 + arr / 100.0))
+        n_days = len(rets)
+        cagr_pct = (cumulative ** (252.0 / n_days) - 1.0) * 100.0
+        # Daily Sharpe
+        sharpe = (float(arr.mean()) / float(arr.std()) * np.sqrt(252)
+                  if arr.std() > 0 else 0.0)
+        # Max drawdown on cumulative equity curve
+        equity = np.cumprod(1 + arr / 100.0)
+        running_max = np.maximum.accumulate(equity)
+        drawdown = (equity - running_max) / running_max * 100.0
+        max_dd = float(drawdown.min())
+        # Transition count
+        if "active_strategy_id" in sub.columns:
+            strategies = sub["active_strategy_id"].to_list()
+            transitions = sum(1 for i in range(1, len(strategies))
+                              if strategies[i] != strategies[i-1])
+        else:
+            transitions = 0
+        rows.append({
+            "policy_id": str(policy_id) if not isinstance(policy_id, str) else policy_id,
+            "n_days": n_days,
+            "cagr_pct": cagr_pct,
+            "daily_sharpe": sharpe,
+            "max_drawdown_pct": max_dd,
+            "n_transitions": transitions,
+            "annual_transitions": float(transitions * 252 / max(n_days, 1)),
+            "total_return_pct": (cumulative - 1.0) * 100.0,
+        })
+    return pl.DataFrame(rows).sort("cagr_pct", descending=True)
+
+
 def per_trade_sharpe(net_pnls: list[float], holds: list[int]) -> float:
     """Per-trade Sharpe with sqrt(252/mean_hold_days) annualization.
 
@@ -365,6 +434,32 @@ def main() -> None:
             daily_publish = Path("data/quant_publish/strategy_regime_daily_matrix.parquet")
             daily_matrix.write_parquet(daily_publish)
             print(f"\n  wrote {daily_publish}")
+
+    # v0.7: multi-strategy harness policy summary (auto-skips if absent)
+    print("\n=== v0.7 multi-strategy policy summary ===")
+    policies = load_multi_strategy_policies()
+    if policies.height == 0:
+        print(f"  [waiting] {SERVER_POLICY_FEED} not yet on publish surface")
+        print(f"  When server-team harness publishes policy outputs, this re-run")
+        print(f"  auto-emits per-policy CAGR/Sharpe/MaxDD/transition stats.")
+        print(f"  Expected first policies: baseline_ungated_dca, baseline_inverse_aggressive,")
+        print(f"                           inverse_aggressive_plus_btc_steady_bull_rotation")
+        print(f"  BTC-rotation target per v0.6 matrix math: +55-75% CAGR")
+    else:
+        print(f"  loaded {policies.height} policy-daily rows for "
+              f"{policies['policy_id'].n_unique()} policies")
+        policy_summary = compute_policy_summary(policies)
+        if policy_summary.height > 0:
+            print(f"\n  per-policy summary:")
+            print(f"  {'policy_id':50s} {'n_days':>7s} {'CAGR%':>8s} {'Sharpe':>7s} "
+                  f"{'MaxDD%':>7s} {'trans/yr':>9s}")
+            for r in policy_summary.iter_rows(named=True):
+                print(f"  {r['policy_id']:50s} {r['n_days']:7d} {r['cagr_pct']:+8.2f} "
+                      f"{r['daily_sharpe']:+7.2f} {r['max_drawdown_pct']:+7.2f} "
+                      f"{r['annual_transitions']:9.1f}")
+            policy_publish = Path("data/quant_publish/multi_strategy_policy_summary.parquet")
+            policy_summary.write_parquet(policy_publish)
+            print(f"\n  wrote {policy_publish}")
 
     # Multi-strategy framework summary — use comparable_yield_pct (cross-class-safe)
     # instead of Sharpe (TP-clustered classes inflate to +50, dwarfs realistic
