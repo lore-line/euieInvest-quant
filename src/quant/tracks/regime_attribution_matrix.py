@@ -255,30 +255,53 @@ def compute_policy_summary(policy_df: pl.DataFrame) -> pl.DataFrame:
     """v0.7: per-policy CAGR + daily Sharpe + max-DD + transition count.
 
     For the BTC-rotation thesis validation, the key comparison is:
-      baseline_inverse_aggressive       → +47.18% canonical
-      inverse_aggressive_plus_btc_rotation → expected +55-75% per
+      baseline_inverse_aggressive       → ~+50% canonical (917-day labeled window)
+      inverse_aggressive_plus_btc_rotation → expected +55-58% per
                                              v0.6 daily matrix math
+
+    CAGR formula: uses harness-emitted `equity` column directly (ground truth)
+    with annualization factor 365/n_rows (matches server-team convention:
+    crypto markets are 24/7, sim-day-as-trading-day). Daily Sharpe uses 365
+    for consistency with the same 365-day-year assumption.
     """
     if policy_df.height == 0:
         return pl.DataFrame()
     rows = []
-    for policy_id, sub in policy_df.group_by("policy_id"):
+    has_equity = "equity" in policy_df.columns
+    for keys, sub in policy_df.group_by("policy_id"):
+        # polars group_by returns tuple keys even when grouping by single col
+        policy_id = keys[0] if isinstance(keys, tuple) else keys
+        sub = sub.sort("date")
         rets = sub["daily_return_pct"].drop_nulls().to_list()
         if len(rets) < 30:
             continue
         arr = np.array(rets)
-        # CAGR from compounding daily
-        cumulative = float(np.prod(1 + arr / 100.0))
         n_days = len(rets)
-        cagr_pct = (cumulative ** (252.0 / n_days) - 1.0) * 100.0
-        # Daily Sharpe
-        sharpe = (float(arr.mean()) / float(arr.std()) * np.sqrt(252)
+
+        # CAGR: prefer harness equity column (ground truth) over daily-return
+        # compounding (which can drift on FP rounding for long runs)
+        if has_equity:
+            eq = sub["equity"].to_list()
+            eq_start, eq_end = float(eq[0]), float(eq[-1])
+            cumulative = eq_end / eq_start
+        else:
+            cumulative = float(np.prod(1 + arr / 100.0))
+        # 365/n_rows annualization (crypto 24/7 convention, server-team standard)
+        cagr_pct = (cumulative ** (365.0 / n_days) - 1.0) * 100.0
+
+        # Daily Sharpe with 365-day-year annualization (crypto convention)
+        sharpe = (float(arr.mean()) / float(arr.std()) * np.sqrt(365)
                   if arr.std() > 0 else 0.0)
-        # Max drawdown on cumulative equity curve
-        equity = np.cumprod(1 + arr / 100.0)
-        running_max = np.maximum.accumulate(equity)
-        drawdown = (equity - running_max) / running_max * 100.0
+
+        # Max drawdown — use harness equity if available, else reconstruct
+        if has_equity:
+            equity_curve = np.array(eq)
+        else:
+            equity_curve = np.cumprod(1 + arr / 100.0)
+        running_max = np.maximum.accumulate(equity_curve)
+        drawdown = (equity_curve - running_max) / running_max * 100.0
         max_dd = float(drawdown.min())
+
         # Transition count
         if "active_strategy_id" in sub.columns:
             strategies = sub["active_strategy_id"].to_list()
@@ -286,15 +309,16 @@ def compute_policy_summary(policy_df: pl.DataFrame) -> pl.DataFrame:
                               if strategies[i] != strategies[i-1])
         else:
             transitions = 0
+
         rows.append({
-            "policy_id": str(policy_id) if not isinstance(policy_id, str) else policy_id,
+            "policy_id": str(policy_id),
             "n_days": n_days,
+            "total_return_pct": (cumulative - 1.0) * 100.0,
             "cagr_pct": cagr_pct,
             "daily_sharpe": sharpe,
             "max_drawdown_pct": max_dd,
             "n_transitions": transitions,
-            "annual_transitions": float(transitions * 252 / max(n_days, 1)),
-            "total_return_pct": (cumulative - 1.0) * 100.0,
+            "annual_transitions": float(transitions * 365 / max(n_days, 1)),
         })
     return pl.DataFrame(rows).sort("cagr_pct", descending=True)
 
