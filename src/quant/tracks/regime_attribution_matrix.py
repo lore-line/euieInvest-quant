@@ -43,7 +43,9 @@ import numpy as np
 import polars as pl
 
 
-REGIME_LABELS_PATH = Path("data/quant_publish/regime_labels_v1.parquet")
+REGIME_LABELS_PATH = Path("data/quant_publish/regime_labels_v2.parquet")
+# v0.4 (in-sample-foresight) path kept for reference / comparison runs
+REGIME_LABELS_V04_PATH = Path("data/quant_publish/regime_labels_v1.parquet")
 PUBLISH_PATH = Path("data/quant_publish/strategy_regime_sharpe_matrix.parquet")
 
 # Consumer-side strategy P&L sources
