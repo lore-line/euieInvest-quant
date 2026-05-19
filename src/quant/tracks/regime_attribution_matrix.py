@@ -197,17 +197,29 @@ def compute_matrix(trades: pl.DataFrame, regime_labels: pl.DataFrame) -> pl.Data
         # not a real return). Per-trade metrics are the comparable ones.
         # Use `mean_pnl_pct × n_trades` mentally for additive-capital-allocation
         # CAGR estimate.
+        mean_pnl = float(np.mean(net))
+        mean_hold = float(np.mean(holds)) if holds else 1.0
+        # comparable_yield_pct: cross-strategy-class comparator that isn't
+        # Sharpe-inflation-vulnerable. Approximates "annualized yield if you
+        # cycled this trade pattern continuously."
+        comparable_yield_pct = mean_pnl * (252.0 / max(mean_hold, 1.0))
+        # sharpe_class: flag whether Sharpe value is comparable cross-class
+        is_tp_clustered = bool(
+            sid.startswith("stream_2c_grid") or "dca" in sid.lower()
+        )
         rows.append({
             "strategy_id": sid,
             "regime_label": reg,
             "n_trades": sub.height,
             "n_unique_entry_days": int(sub["entry_date"].n_unique()),
-            "mean_pnl_pct": float(np.mean(net)),
+            "mean_pnl_pct": mean_pnl,
             "median_pnl_pct": float(np.median(net)),
             "per_trade_sharpe": per_trade_sharpe(net, holds),
+            "sharpe_class": "tp_clustered" if is_tp_clustered else "realistic",
+            "comparable_yield_pct": comparable_yield_pct,
             "win_rate_pct": float((np.array(net) > 0).mean() * 100),
             "max_trade_loss_pct": float(min(net)),
-            "mean_hold_days": float(np.mean(holds)),
+            "mean_hold_days": mean_hold,
             "confidence": "high" if sub.height >= 30 else ("medium" if sub.height >= 10 else "low"),
         })
     return pl.DataFrame(rows).sort(["strategy_id", "regime_label"])
@@ -241,13 +253,13 @@ def main() -> None:
     for sid in matrix["strategy_id"].unique().to_list():
         print(f"\n{sid}")
         sub = matrix.filter(pl.col("strategy_id") == sid).sort("regime_label")
-        print(f"  {'regime':25s} {'n':>5s} {'win%':>6s} {'mean%':>7s} {'med%':>7s} "
-              f"{'sharpe':>7s} {'maxloss':>8s} {'conf':>6s}")
+        print(f"  {'regime':25s} {'n':>5s} {'win%':>6s} {'mean%':>7s} "
+              f"{'sharpe':>7s} {'cls':>12s} {'yield%/yr':>10s} {'conf':>6s}")
         for r in sub.iter_rows(named=True):
             print(f"  {r['regime_label']:25s} {r['n_trades']:5d} "
                   f"{r['win_rate_pct']:6.1f} {r['mean_pnl_pct']:+7.2f} "
-                  f"{r['median_pnl_pct']:+7.2f} {r['per_trade_sharpe']:+7.3f} "
-                  f"{r['max_trade_loss_pct']:+8.2f} {r['confidence']:>6s}")
+                  f"{r['per_trade_sharpe']:+7.3f} {r['sharpe_class']:>12s} "
+                  f"{r['comparable_yield_pct']:+10.1f} {r['confidence']:>6s}")
 
     # Server-side gaps still pending
     print("\n=== SERVER-SIDE PENDING (not yet in feed) ===")
@@ -259,16 +271,20 @@ def main() -> None:
     matrix.write_parquet(PUBLISH_PATH)
     print(f"\n=== wrote {PUBLISH_PATH} ({matrix.height} rows) ===")
 
-    # Multi-strategy framework summary
-    print("\n=== MULTI-STRATEGY ALLOCATION HINTS (from matrix) ===")
+    # Multi-strategy framework summary — use comparable_yield_pct (cross-class-safe)
+    # instead of Sharpe (TP-clustered classes inflate to +50, dwarfs realistic
+    # momentum cells even when they have higher per-trade economics).
+    print("\n=== MULTI-STRATEGY ALLOCATION HINTS (ranked by comparable_yield_pct) ===")
     for regime in matrix["regime_label"].unique().drop_nulls().to_list():
         sub = matrix.filter((pl.col("regime_label") == regime)
-                            & (pl.col("confidence") != "low")).sort("per_trade_sharpe", descending=True)
+                            & (pl.col("confidence") != "low")
+                            ).sort("comparable_yield_pct", descending=True)
         if sub.height == 0:
             continue
-        best = sub.row(0, named=True)
-        print(f"  {regime:25s} → best consumer-side strategy: {best['strategy_id']:35s} "
-              f"sharpe={best['per_trade_sharpe']:+6.3f} n={best['n_trades']}")
+        print(f"\n  {regime}:")
+        for r in sub.head(3).iter_rows(named=True):
+            print(f"    {r['strategy_id']:35s} yield={r['comparable_yield_pct']:+8.1f}%/yr  "
+                  f"sharpe={r['per_trade_sharpe']:+7.2f} ({r['sharpe_class']:>12s})  n={r['n_trades']}")
 
 
 if __name__ == "__main__":
