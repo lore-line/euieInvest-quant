@@ -38,11 +38,17 @@ FIXED_FRICTION_VOL_30D = 500_000.0
 VERSIONS = [1, 2, 3]
 
 MASTER_UNIVERSE = [
+    # First 20 (validated; matches prior sweeps for direct comparison at N≤20)
     "BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD",
     "AVAX-USD", "DOT-USD", "LINK-USD", "ATOM-USD",
     "RUNE-USD", "FET-USD", "DOGE-USD", "XRP-USD",
     "INJ-USD", "GRT-USD", "AAVE-USD", "UNI-USD",
     "NEAR-USD", "SUSHI-USD", "APT-USD", "TIA-USD",
+    # Job 3 universe expansion (issue #24) — 14 thin-mid alts
+    "ALGO-USD", "FIL-USD", "ICP-USD", "XLM-USD",
+    "MANA-USD", "SAND-USD", "AXS-USD", "CHZ-USD",
+    "ENJ-USD", "COMP-USD", "MKR-USD", "SNX-USD",
+    "KAVA-USD", "CRV-USD",
 ]
 
 BASE_PARAMS = {
@@ -174,7 +180,7 @@ def main() -> int:
 
     base_pcts = [0.0005, 0.0010, 0.0020, 0.0030, 0.0040, 0.0050, 0.0070,
                  0.0100, 0.0150, 0.0200, 0.0300, 0.0400, 0.0500]
-    universe_sizes = [2, 4, 6, 8, 10, 12, 16, 20]
+    universe_sizes = [2, 4, 6, 8, 10, 12, 16, 20, 24, 28, 30, 34]
 
     all_results = []
     for N in universe_sizes:
