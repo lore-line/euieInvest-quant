@@ -1,5 +1,24 @@
 # Continuity prompt — 2026-05-19 session wrap (final, post-§9.7-prune)
 
+## 2026-05-20 update (post-restart, server-team maintenance bundle)
+
+Server-team commit [`0d78249`](https://github.com/lore-line/euieInvest/commit/0d78249) on companion repo (19:22Z):
+
+1. **Taxonomy rename — display labels only, internal IDs preserved.** When reading dashboards or new docs:
+   - "Tier 0/1/2d/2e" now displayed as "Stream 2.a/2.b/2.c/2.d"
+   - "Stream 1b" → "Stream 4.b", "Stream 2a" → "Stream 4.a"
+   - Stream 4 = WS non-reg parent for momentum legs
+   - **Internal IDs (tier0, stream1b, parquet filenames, src/lib/streams.ts constants) unchanged** — this prompt's references to tier 0/1/2d/2e/etc. are still valid for code/data; only the dashboard text changed.
+2. **Cron ABI fix** — `sentry-cron-wrap.mjs` coerces inner `node` to `process.execPath`. Resolved the Stream 4.b / Stream 4.a (formerly tier 1b / Stream 2a) silent ntfy failures I observed in the first-day-of-paper-trade sweep. Should produce notifications on tomorrow's sweep.
+3. **Plan-generator weights re-calibrated** (Stream 1a Buffett side): BUY MORE 5→6 buyLevels + 0.80→0.95 budget (92.3% beat rate, +22.5% alpha n=13); SELL 0.90→0.95 (65.6% beat rate n=32). STRONG BUY + TRIM held. Direction: more aggressive on conviction names, more aggressive on laggard sells.
+4. **New tooling on server side** — `backtest-ratings.mjs` (SPY-alpha + beat rate columns), `archive-intraday-to-parquet.py` (monthly parquet snapshot of intraday_history, 12.4× compression vs SQLite).
+
+Nothing in this bundle invalidates the 6-strategy roster or §9.7 deployment posture. Resume directive + don't-list below all still apply.
+
+**ntfy monitor**: re-armed as task `bgubd4fbe` (replaces dead `brdgluzrj` killed by 2026-05-20 restart).
+
+---
+
 **Session continuation:** Picked up ~14:50Z, continued through ~20:50Z. Session arcs in chronological order:
 1. **AM**: P1 v0.6 retention question, paper-trade roster at 7
 2. **Mid-day (~17:15Z)**: 2018-extension validated Balanced/Aggressive (83-89% retention), α-vs-SPY framing adopted, roster grew to 9 (tier 2d, 2e, 2a, 3a added)
