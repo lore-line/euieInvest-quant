@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "generated_for_issue": "lore-line/euieInvest-quant#25",
+  "generated_by": "scripts/ops/build_vol_augmented_labels.py (consumer team)",
+
+  "_doc_direction_mapping": {
+    "rule": "Maps 4-class regime_label + confidence threshold to 3-class direction key used in matrix lookup",
+    "confidence_threshold": 0.7,
+    "below_threshold_fallback": "sideways",
+    "mapping": {
+      "bear_trend":      "bear      (if regime_confidence >= 0.7, else sideways)",
+      "steady_bull":     "bull      (if regime_confidence >= 0.7, else sideways)",
+      "sideways_range":  "sideways  (regardless of confidence)",
+      "choppy_recovery": "sideways  (transitional regime; defaults to sideways regardless of confidence)"
+    }
+  },
+
+  "_doc_vol_tercile_source": "regime_labels_v2_vol_augmented.parquet column vol_tercile in {low, mid, high}. Tercile assignment is WF-OOS-correct (rolling-252d, no look-ahead).",
+
+  "_doc_implementation_pseudocode": [
+    "def get_multiplier(matrix, regime_label, vol_tercile, regime_confidence):",
+    "    if regime_confidence < 0.7:",
+    "        direction = 'sideways'",
+    "    elif regime_label == 'bear_trend':",
+    "        direction = 'bear'",
+    "    elif regime_label == 'steady_bull':",
+    "        direction = 'bull'",
+    "    else:  # sideways_range, choppy_recovery",
+    "        direction = 'sideways'",
+    "    return matrix[direction][vol_tercile]"
+  ],
+
+  "variants": {
+    "A": {
+      "name": "Symmetric Kelly (headline proposal)",
+      "description": "Theory-driven 3-step gradient. Bull/low = idle-capital compensation; Bear/high = cliff insurance. The default proposed in issue #25.",
+      "matrix": {
+        "bull":     {"low": 1.5, "mid": 1.2, "high": 0.8},
+        "sideways": {"low": 1.3, "mid": 1.0, "high": 0.7},
+        "bear":     {"low": 1.0, "mid": 0.7, "high": 0.5}
+      }
+    },
+    "B": {
+      "name": "Aggressive Kelly (steeper)",
+      "description": "Larger swings around baseline. Bull/low = 2.0x; Bear/high = 0.3x. Tests whether sharper Kelly bets dominate.",
+      "matrix": {
+        "bull":     {"low": 2.0, "mid": 1.4, "high": 0.6},
+        "sideways": {"low": 1.5, "mid": 1.0, "high": 0.5},
+        "bear":     {"low": 1.0, "mid": 0.5, "high": 0.3}
+      }
+    },
+    "C": {
+      "name": "Conservative Kelly (gentler)",
+      "description": "Smaller swings around baseline. Min 0.7x, max 1.25x. Tests whether subtle modulation is enough.",
+      "matrix": {
+        "bull":     {"low": 1.25, "mid": 1.10, "high": 0.90},
+        "sideways": {"low": 1.15, "mid": 1.00, "high": 0.85},
+        "bear":     {"low": 1.00, "mid": 0.85, "high": 0.70}
+      }
+    },
+    "D": {
+      "name": "Vol-only ablation control (1D)",
+      "description": "Strip direction axis. Multiplier depends only on vol tercile. Ablation control: tests whether vol axis alone captures the edge.",
+      "matrix": {
+        "bull":     {"low": 1.5, "mid": 1.0, "high": 0.5},
+        "sideways": {"low": 1.5, "mid": 1.0, "high": 0.5},
+        "bear":     {"low": 1.5, "mid": 1.0, "high": 0.5}
+      }
+    },
+    "E": {
+      "name": "Direction-only ablation control (1D)",
+      "description": "Strip vol axis. Multiplier depends only on regime direction. Ablation control: tests whether direction axis alone captures the edge.",
+      "matrix": {
+        "bull":     {"low": 1.3, "mid": 1.3, "high": 1.3},
+        "sideways": {"low": 1.0, "mid": 1.0, "high": 1.0},
+        "bear":     {"low": 0.7, "mid": 0.7, "high": 0.7}
+      }
+    },
+    "F": {
+      "name": "Search-space schema (grid / Bayesian opt)",
+      "description": "Not a fixed matrix. Search-space specification for the executor. Per issue #25 + #27, use 1k random samples + local search around top-10, OR Bayesian opt per #27 algorithm choice. β-mode n_safety_orders multiplier must hard-floor at 4 SOs (per server team confirmation 2026-05-21).",
+      "is_search_space": true,
+      "matrix_bounds": {
+        "bull":     {"low": [0.3, 2.0], "mid": [0.3, 2.0], "high": [0.3, 2.0]},
+        "sideways": {"low": [0.3, 2.0], "mid": [0.3, 2.0], "high": [0.3, 2.0]},
+        "bear":     {"low": [0.3, 2.0], "mid": [0.3, 2.0], "high": [0.3, 2.0]}
+      }
+    }
+  },
+
+  "_doc_baseline": {
+    "config": "Stream 2.a ungated DCA — base_pct=0.5%, n_safety_orders=9, first_so_step=2.57, so_step_scale=1.69, so_volume_scale=2.30, strand_ban_days=122 (per paper-trade-tier0.sh)",
+    "comparison_anchor": "All variants are multipliers ON TOP of this baseline. multiplier=1.0 everywhere = identity = baseline."
+  }
+}
