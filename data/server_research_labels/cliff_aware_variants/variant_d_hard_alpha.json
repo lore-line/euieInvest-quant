@@ -1,0 +1,34 @@
+{
+  "name": "Variant D \u2014 Vol-only ablation (1D control) [\u03b1]",
+  "description": "Strip direction axis; multiplier depends only on vol tercile. Ablation control.",
+  "mode": "hard",
+  "scale_safety_orders": false,
+  "min_safety_orders": 4,
+  "matrix": {
+    "bear_trend": {
+      "low": 1.5,
+      "mid": 1.0,
+      "high": 0.5
+    },
+    "choppy_recovery": {
+      "low": 1.5,
+      "mid": 1.0,
+      "high": 0.5
+    },
+    "sideways_range": {
+      "low": 1.5,
+      "mid": 1.0,
+      "high": 0.5
+    },
+    "steady_bull": {
+      "low": 1.5,
+      "mid": 1.0,
+      "high": 0.5
+    },
+    "unknown": {
+      "low": 1.0,
+      "mid": 1.0,
+      "high": 1.0
+    }
+  }
+}

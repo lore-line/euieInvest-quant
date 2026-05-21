@@ -1,0 +1,34 @@
+{
+  "name": "Variant C \u2014 Conservative Kelly (gentler) [\u03b1]",
+  "description": "Smaller swings around baseline. Min 0.7x, max 1.25x. Tests subtle modulation.",
+  "mode": "hard",
+  "scale_safety_orders": false,
+  "min_safety_orders": 4,
+  "matrix": {
+    "bear_trend": {
+      "low": 1.0,
+      "mid": 0.85,
+      "high": 0.7
+    },
+    "choppy_recovery": {
+      "low": 1.15,
+      "mid": 1.0,
+      "high": 0.85
+    },
+    "sideways_range": {
+      "low": 1.15,
+      "mid": 1.0,
+      "high": 0.85
+    },
+    "steady_bull": {
+      "low": 1.25,
+      "mid": 1.1,
+      "high": 0.9
+    },
+    "unknown": {
+      "low": 1.0,
+      "mid": 1.0,
+      "high": 1.0
+    }
+  }
+}

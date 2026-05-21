@@ -1,0 +1,34 @@
+{
+  "name": "Variant E \u2014 Direction-only ablation (1D control) [\u03b1]",
+  "description": "Strip vol axis; multiplier depends only on regime direction. Ablation control.",
+  "mode": "hard",
+  "scale_safety_orders": false,
+  "min_safety_orders": 4,
+  "matrix": {
+    "bear_trend": {
+      "low": 0.7,
+      "mid": 0.7,
+      "high": 0.7
+    },
+    "choppy_recovery": {
+      "low": 1.0,
+      "mid": 1.0,
+      "high": 1.0
+    },
+    "sideways_range": {
+      "low": 1.0,
+      "mid": 1.0,
+      "high": 1.0
+    },
+    "steady_bull": {
+      "low": 1.3,
+      "mid": 1.3,
+      "high": 1.3
+    },
+    "unknown": {
+      "low": 1.0,
+      "mid": 1.0,
+      "high": 1.0
+    }
+  }
+}

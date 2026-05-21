@@ -122,6 +122,12 @@ def main() -> int:
               "defaulting to 'mid'", file=sys.stderr)
         out["vol_tercile"] = out["vol_tercile"].fillna("mid")
 
+    # Drop tz from date for compatibility with downstream loaders that
+    # assume naive dates (e.g., harness load_regime_lookup() does
+    # `.dt.tz_localize("UTC")` and fails on tz-aware input). Matches the
+    # source regime_labels_v2.parquet format (object/naive dates).
+    out["date"] = out["date"].dt.tz_localize(None)
+
     # Write output.
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out.to_parquet(OUT_PATH, index=False)
