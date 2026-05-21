@@ -17,8 +17,13 @@ import numpy as np
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent.parent
+# NOTE: param is `symbols=` (plural CSV), NOT `symbol=` (singular). Per server
+# team #25 contract clarification 2026-05-21T02:32Z: unknown query params 422
+# silently and the endpoint returns the full unfiltered table. Earlier versions
+# of this script used the singular form and worked around the "all symbols"
+# result with a client-side filter — that workaround is no longer needed.
 SIDECAR_INTRADAY_URL = (
-    "http://100.68.86.56:8443/api/v1/intraday?symbol=BTC-USD&interval_min=60"
+    "http://100.68.86.56:8443/api/v1/intraday?symbols=BTC-USD&interval_min=60"
 )
 SOURCE_LABELS = REPO / "data" / "quant_publish" / "regime_labels_v2.parquet"
 OUT_DIR = REPO / "data" / "server_research_labels" / "cliff_aware_variants"
@@ -35,7 +40,9 @@ def load_btc_daily_sidecar() -> pd.DataFrame:
     print(f"[sidecar] GET {SIDECAR_INTRADAY_URL}", file=sys.stderr)
     data = urllib.request.urlopen(SIDECAR_INTRADAY_URL, timeout=60).read()
     df = pd.read_parquet(io.BytesIO(data))
-    # Sidecar /intraday ignores symbol query param; client-side filter required.
+    # Defensive: if the endpoint ever returns a multi-symbol response despite
+    # symbols= filter, take only BTC-USD rows. Should be 1 symbol given the
+    # plural-param contract.
     df = df[df["symbol"] == "BTC-USD"]
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     if df["timestamp"].dt.tz is None:
